@@ -23,9 +23,18 @@ docker build -t dfir/mftecmd:latest   --build-arg EZTOOL=MFTECmd \
   --build-arg EZTOOL_SHA256=<sha256 of MFTECmd.zip> -f eztool/Dockerfile .
 ```
 
-Verified tool matrix (all build from the one Dockerfile): RECmd, SrumECmd,
-MFTECmd, PECmd, AmcacheParser, AppCompatCacheParser, LECmd, JLECmd, SBECmd,
-SQLECmd, RBCmd, WxTCmd. Tools that ship data sets alongside the DLL keep them
+Verified tool matrix (all build from the one Dockerfile, all parse-verified on
+Linux): RECmd, MFTECmd, PECmd, AmcacheParser, AppCompatCacheParser, LECmd,
+JLECmd, SBECmd, SQLECmd, RBCmd, WxTCmd.
+
+**SrumECmd builds but is Windows-host-only**: its shipped assembly embeds
+ManagedEsent (`Esent.Interop`), a P/Invoke wrapper around Windows' native ESE
+engine (`esent.dll`) — an OS component that does not exist on Linux, so the
+tool refuses at database-open time ("Non-Windows platforms not supported...").
+Verified empirically: it is the ONLY tool in the family with that dependency.
+On a Linux pipeline, parse SRUDB.dat with Plaso's `esedb/srum` parser instead
+(libesedb — a pure cross-platform ESE implementation): the same artefact
+yields the same data. Tools that ship data sets alongside the DLL keep them
 (RECmd's `BatchExamples/`, SQLECmd's `Maps/`) at `/opt/eztool/`.
 
 `evtxecmd/Dockerfile` is the original, EvtxECmd-specific build (bakes `Maps/`;

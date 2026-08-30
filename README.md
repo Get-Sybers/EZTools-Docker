@@ -24,8 +24,22 @@ docker build -t dfir/mftecmd:latest   --build-arg EZTOOL=MFTECmd \
 ```
 
 Verified tool matrix (all build from the one Dockerfile, all parse-verified on
-Linux): RECmd, MFTECmd, PECmd, AmcacheParser, AppCompatCacheParser, LECmd,
-JLECmd, SBECmd, SQLECmd, RBCmd, WxTCmd.
+Linux against real evidence): RECmd, MFTECmd, AmcacheParser,
+AppCompatCacheParser, LECmd, JLECmd, SBECmd, SQLECmd, RBCmd, WxTCmd.
+
+Linux run notes learned from real evidence:
+- **AppCompatCacheParser / SBECmd**: a dirty hive needs its transaction LOGs
+  (`.LOG1`/`.LOG2`) extracted alongside, or the tool aborts.
+- **WxTCmd**: its SQLite interop unpacks a native library beside the tool DLL —
+  on a read-only rootfs, run the tool from a writable copy and add
+  `--tmpfs /opt/eztool:rw,nosuid,nodev,exec,size=256m,uid=2000,gid=2000`.
+
+**PECmd builds but is Windows-host-only**: verified empirically, its startup
+guard aborts on ANY non-Windows platform — even for uncompressed XP-era
+prefetch that needs no MAM decompression (the guard exists because Win10+
+`.pf` are XPRESS-Huffman compressed and PECmd decompresses via the
+Windows-native `RtlDecompressBufferEx`). On Linux, parse prefetch with Plaso
+(libscca) instead.
 
 **SrumECmd builds but is Windows-host-only**: its shipped assembly embeds
 ManagedEsent (`Esent.Interop`), a P/Invoke wrapper around Windows' native ESE

@@ -164,6 +164,24 @@ and execs the copy — so run WxTCmd with a writable, exec-capable tmpfs:
 
 (`EZTOOL_RUN_FROM_TMP=1|0` forces the behaviour on/off for any tool.)
 
+## Two run modes
+
+Every parser here is fed one of two ways, and the flags are the same shape in
+both:
+
+1. **A mounted disk image** — mount the image on the host (ewfmount/losetup +
+   mount, or your image-export stage) and bind the filesystem root read-only
+   into the container. `prefetch_dump -d /image` walks the whole tree for
+   `*.pf`; `ese_dump -d /image` finds every SRUM database (`SRUDB.dat`) and
+   SUM database (`*.mdb` under a `SUM/` directory) case-insensitively and
+   dumps each into its own sub-directory (`SRUM_SRUDB/`, `SUM_Current/`, …)
+   with a `SourceDb` field on every row. The .NET tools that take `-d`
+   (EvtxECmd, LECmd, JLECmd, SBECmd, …) can be pointed at the mounted root
+   the same way.
+2. **Extracted / loose files** — a staged directory of `.evtx`, hives, `.pf`,
+   or a single database: same containers, `-d` at the staged directory or
+   `-f` at the file.
+
 ## Parse-time efficiency: how to run these
 
 The images are offline parsers — run them with nothing but mounts:

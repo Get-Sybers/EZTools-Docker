@@ -8,6 +8,14 @@
 // Velociraptor's go-ese, a pure-Go ESE implementation, so SRUDB.dat and SUM
 // databases (Current.mdb / SystemIdentity.mdb) parse on Linux.
 //
+// Two run modes:
+//
+//	-f <db>    one database: an extracted SRUDB.dat / Current.mdb / any ESE file
+//	-d <root>  a mounted disk image root (or any staged tree): finds every
+//	           SRUM database (SRUDB.dat) and SUM database (*.mdb directly
+//	           under a SUM/ directory) case-insensitively, and dumps each
+//	           into its own sub-directory; rows gain a SourceDb field.
+//
 // Output is one JSONL (or CSV) file per table. For SRUM databases the
 // SruDbIdMapTable is decoded automatically: AppId/UserId columns in the data
 // tables gain AppIdName / UserIdName fields (UTF-16LE strings, or the SID for
@@ -18,7 +26,8 @@
 // left as-is.
 //
 // Exit codes: 0 = all requested tables dumped; 1 = usage or fatal error;
-// 2 = at least one table failed (others still written, failures on stderr).
+// 2 = at least one table or database failed (the rest still written,
+// failures on stderr).
 package main
 
 import (
@@ -28,8 +37,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf16"
 
@@ -199,7 +210,7 @@ func openOut(dir, name string) (io.WriteCloser, error) {
 }
 
 func dumpTable(cat *parser.Catalog, table string, idMap map[int64]idEntry,
-	jsonDir, csvDir string) (int, error) {
+	jsonDir, csvDir, sourceDb string) (int, error) {
 	enrich := func(row *ordereddict.Dict) {
 		if idMap == nil {
 			return
@@ -231,7 +242,11 @@ func dumpTable(cat *parser.Catalog, table string, idMap map[int64]idEntry,
 			}
 		}()
 		cw := csv.NewWriter(w)
-		header := tableColumns(cat, table)
+		var header []string
+		if sourceDb != "" {
+			header = append(header, "SourceDb")
+		}
+		header = append(header, tableColumns(cat, table)...)
 		if idMap != nil {
 			for _, extra := range []string{"AppIdName", "UserIdName"} {
 				for _, h := range header {
@@ -250,6 +265,10 @@ func dumpTable(cat *parser.Catalog, table string, idMap map[int64]idEntry,
 			enrich(row)
 			out := make([]string, len(header))
 			for i, h := range header {
+				if h == "SourceDb" && sourceDb != "" {
+					out[i] = sourceDb
+					continue
+				}
 				if v, ok := row.Get(h); ok && v != nil {
 					out[i] = fmt.Sprintf("%v", v)
 				}
@@ -276,7 +295,11 @@ func dumpTable(cat *parser.Catalog, table string, idMap map[int64]idEntry,
 	err = cat.DumpTable(table, func(row *ordereddict.Dict) error {
 		rows++
 		enrich(row)
-		out := ordereddict.NewDict().Set("Table", table)
+		out := ordereddict.NewDict()
+		if sourceDb != "" {
+			out.Set("SourceDb", sourceDb)
+		}
+		out.Set("Table", table)
 		if a := aliasFor(table); a != "" {
 			out.Set("TableAlias", a)
 		}
@@ -286,42 +309,87 @@ func dumpTable(cat *parser.Catalog, table string, idMap map[int64]idEntry,
 	return rows, err
 }
 
-func main() {
-	var (
-		file    = flag.String("f", "", "ESE database to parse (SRUDB.dat, Current.mdb, ...)")
-		tables  = flag.String("t", "", "comma-separated tables to dump (name, SRUM alias, or GUID); default: every non-MSys table")
-		list    = flag.Bool("list", false, "list tables and columns, then exit")
-		jsonDir = flag.String("json", "", "directory for per-table JSONL files (default: stdout stream)")
-		csvDir  = flag.String("csv", "", "directory for per-table CSV files instead of JSONL")
-		quiet   = flag.Bool("q", false, "suppress per-table progress on stderr")
-	)
-	flag.Parse()
+type dbHit struct {
+	path string
+	kind string // "SRUM" or "SUM" — logging only, parsing is identical
+}
 
-	if *file == "" {
-		fmt.Fprintln(os.Stderr, "ese_dump: -f <database> is required")
-		flag.Usage()
-		os.Exit(1)
+// findDatabases walks a mounted image root (or any staged tree) and returns
+// every SRUM database (SRUDB.dat) and SUM database (*.mdb whose immediate
+// parent directory is SUM/), matched case-insensitively. Unreadable
+// subtrees are skipped with a note, not fatal — disk image mounts routinely
+// contain them.
+func findDatabases(root string) []dbHit {
+	var hits []dbHit
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ese_dump: skipping unreadable %s: %v\n", p, err)
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(d.Name())
+		switch {
+		case name == "srudb.dat":
+			hits = append(hits, dbHit{p, "SRUM"})
+		case strings.HasSuffix(name, ".mdb") &&
+			strings.EqualFold(filepath.Base(filepath.Dir(p)), "sum"):
+			hits = append(hits, dbHit{p, "SUM"})
+		}
+		return nil
+	})
+	sort.Slice(hits, func(i, j int) bool { return hits[i].path < hits[j].path })
+	return hits
+}
+
+// dbSubdir builds a stable per-database output directory name like
+// SRUM_SRUDB or SUM_Current, de-duplicated when an image holds several.
+func dbSubdir(hit dbHit, used map[string]int) string {
+	base := strings.TrimSuffix(filepath.Base(hit.path), filepath.Ext(hit.path))
+	name := hit.kind + "_" + safeName(base)
+	used[name]++
+	if used[name] > 1 {
+		name = fmt.Sprintf("%s-%d", name, used[name])
 	}
+	return name
+}
 
-	f, err := os.Open(*file)
+// processDb opens and dumps one database. strictTables makes an unknown -t
+// entry fatal (single -f mode); in root-scan mode it is noted and skipped
+// instead, since a SUM database has no SRUM tables and vice versa. Returns
+// the number of failed tables plus any fatal open/catalog error.
+func processDb(path, sourceDb, jsonDir, csvDir, tablesFlag string,
+	list, strictTables, quiet bool) (int, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ese_dump: %v\n", err)
-		os.Exit(1)
+		return 0, err
 	}
 	defer f.Close()
 
 	ctx, err := parser.NewESEContext(f)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ese_dump: not a readable ESE database: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("not a readable ESE database: %w", err)
 	}
 	cat, err := parser.ReadCatalog(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ese_dump: catalog read failed: %v\n", err)
-		os.Exit(1)
+		return 0, fmt.Errorf("catalog read failed: %w", err)
 	}
 
-	if *list {
+	label := func(table string) string {
+		if sourceDb != "" {
+			return sourceDb + ": " + table
+		}
+		return table
+	}
+
+	if list {
+		if sourceDb != "" {
+			fmt.Println("== " + sourceDb)
+		}
 		for _, name := range cat.Tables.Keys() {
 			line := name
 			if a := aliasFor(name); a != "" {
@@ -330,12 +398,12 @@ func main() {
 			fmt.Println(line)
 			fmt.Println("    " + strings.Join(tableColumns(cat, name), ", "))
 		}
-		return
+		return 0, nil
 	}
 
 	// Resolve the requested table set.
 	var selected []string
-	if *tables == "" {
+	if tablesFlag == "" {
 		for _, name := range cat.Tables.Keys() {
 			if strings.HasPrefix(name, "MSys") {
 				continue
@@ -347,7 +415,7 @@ func main() {
 		for guid, alias := range srumAliases {
 			byAlias[strings.ToLower(alias)] = guid
 		}
-		for _, want := range strings.Split(*tables, ",") {
+		for _, want := range strings.Split(tablesFlag, ",") {
 			want = strings.TrimSpace(want)
 			if want == "" {
 				continue
@@ -364,32 +432,105 @@ func main() {
 				}
 			}
 			if found == "" {
-				fmt.Fprintf(os.Stderr, "ese_dump: table %q not found (use --list)\n", want)
-				os.Exit(1)
+				if strictTables {
+					fmt.Fprintf(os.Stderr, "ese_dump: table %q not found (use --list)\n", want)
+					os.Exit(1)
+				}
+				fmt.Fprintf(os.Stderr, "ese_dump: %s: table %q not present, skipping\n", sourceDb, want)
+				continue
 			}
 			selected = append(selected, found)
 		}
 	}
 
 	idMap := loadIdMap(cat)
-	if idMap != nil && !*quiet {
-		fmt.Fprintf(os.Stderr, "ese_dump: SRUM id map loaded (%d entries) — AppIdName/UserIdName enrichment on\n", len(idMap))
+	if idMap != nil && !quiet {
+		fmt.Fprintf(os.Stderr, "ese_dump: %s: SRUM id map loaded (%d entries) — AppIdName/UserIdName enrichment on\n",
+			path, len(idMap))
 	}
 
 	failed := 0
 	for _, table := range selected {
-		rows, err := dumpTable(cat, table, idMap, *jsonDir, *csvDir)
+		rows, err := dumpTable(cat, table, idMap, jsonDir, csvDir, sourceDb)
 		if err != nil {
 			failed++
-			fmt.Fprintf(os.Stderr, "ese_dump: FAILED %s after %d rows: %v\n", table, rows, err)
+			fmt.Fprintf(os.Stderr, "ese_dump: FAILED %s after %d rows: %v\n", label(table), rows, err)
 			continue
 		}
-		if !*quiet {
-			fmt.Fprintf(os.Stderr, "ese_dump: dumped %s (%d rows)\n", table, rows)
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "ese_dump: dumped %s (%d rows)\n", label(table), rows)
 		}
 	}
-	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "ese_dump: %d of %d tables failed\n", failed, len(selected))
+	return failed, nil
+}
+
+func main() {
+	var (
+		file    = flag.String("f", "", "one ESE database to parse (SRUDB.dat, Current.mdb, ...)")
+		root    = flag.String("d", "", "mounted disk image root (or staged tree) to scan for SRUM/SUM databases")
+		tables  = flag.String("t", "", "comma-separated tables to dump (name, SRUM alias, or GUID); default: every non-MSys table")
+		list    = flag.Bool("list", false, "list tables and columns, then exit")
+		jsonDir = flag.String("json", "", "directory for per-table JSONL files (default: stdout stream)")
+		csvDir  = flag.String("csv", "", "directory for per-table CSV files instead of JSONL")
+		quiet   = flag.Bool("q", false, "suppress per-table progress on stderr")
+	)
+	flag.Parse()
+
+	if (*file == "") == (*root == "") {
+		fmt.Fprintln(os.Stderr, "ese_dump: exactly one of -f <database> or -d <root> is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Mode 2: one extracted database, output exactly as requested.
+	if *file != "" {
+		failed, err := processDb(*file, "", *jsonDir, *csvDir, *tables, *list, true, *quiet)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ese_dump: %s: %v\n", *file, err)
+			os.Exit(1)
+		}
+		if failed > 0 {
+			fmt.Fprintf(os.Stderr, "ese_dump: %d tables failed\n", failed)
+			os.Exit(2)
+		}
+		return
+	}
+
+	// Mode 1: a mounted disk image root — find every SRUM/SUM database and
+	// dump each into its own sub-directory (SRUM_SRUDB/, SUM_Current/, ...).
+	hits := findDatabases(*root)
+	if len(hits) == 0 {
+		fmt.Fprintf(os.Stderr, "ese_dump: no SRUM or SUM databases found under %s\n", *root)
+		os.Exit(1)
+	}
+	used := map[string]int{}
+	failedDbs, failedTables := 0, 0
+	for _, hit := range hits {
+		rel, err := filepath.Rel(*root, hit.path)
+		if err != nil {
+			rel = hit.path
+		}
+		sub := dbSubdir(hit, used)
+		jd, cd := *jsonDir, *csvDir
+		if jd != "" {
+			jd = filepath.Join(jd, sub)
+		}
+		if cd != "" {
+			cd = filepath.Join(cd, sub)
+		}
+		if !*quiet {
+			fmt.Fprintf(os.Stderr, "ese_dump: %s database %s -> %s\n", hit.kind, rel, sub)
+		}
+		ft, err := processDb(hit.path, rel, jd, cd, *tables, *list, false, *quiet)
+		if err != nil {
+			failedDbs++
+			fmt.Fprintf(os.Stderr, "ese_dump: FAILED %s: %v\n", rel, err)
+			continue
+		}
+		failedTables += ft
+	}
+	if failedDbs > 0 || failedTables > 0 {
+		fmt.Fprintf(os.Stderr, "ese_dump: %d databases and %d tables failed\n", failedDbs, failedTables)
 		os.Exit(2)
 	}
 }

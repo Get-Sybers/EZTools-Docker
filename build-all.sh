@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# Build the hardened DFIR images: one per-tool image per Linux-viable EZ tool
+# (eztool/Dockerfile), the two Go substitute images (prefetch/, srum/), and —
+# on request — the all-in-one image (eztools-all/).
+#
+#   ./build-all.sh                 # every per-tool image + prefetch + esedump
+#   ./build-all.sh recmd mftecmd   # a subset (names case-insensitive)
+#   ./build-all.sh all-in-one      # the single dfir/eztools image
+#   ./build-all.sh prefetch esedump
+#
+# PECmd, SrumECmd, SumECmd and VSCMount are not in the list on purpose: they
+# cannot parse artifacts on Linux (see README). prefetch and esedump are their
+# Linux substitutes.
+set -Eeuo pipefail
+cd "$(dirname "$0")"
+
+# Zip basenames on download.ericzimmermanstools.com/net9/ — casing matters for
+# the download URL, so keep these exactly as published.
+LINUX_TOOLS=(
+  AmcacheParser AppCompatCacheParser bstrings EvtxECmd iisGeolocate JLECmd
+  LECmd MFTECmd RBCmd RecentFileCacheParser RECmd rla SBECmd SQLECmd WxTCmd
+)
+
+lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+build_eztool() {
+  local tool="$1"
+  echo "==> dfir/$(lc "${tool}") (eztool/Dockerfile, EZTOOL=${tool})"
+  docker build -t "dfir/$(lc "${tool}"):latest" \
+    --build-arg EZTOOL="${tool}" -f eztool/Dockerfile .
+}
+
+build_prefetch() {
+  echo "==> dfir/prefetch (Go, PECmd substitute)"
+  docker build -t dfir/prefetch:latest -f prefetch/Dockerfile prefetch
+}
+
+build_esedump() {
+  echo "==> dfir/esedump (Go, SrumECmd/SumECmd substitute)"
+  docker build -t dfir/esedump:latest -f srum/Dockerfile srum
+}
+
+build_all_in_one() {
+  echo "==> dfir/eztools (all-in-one, eztools-all/Dockerfile)"
+  docker build -t dfir/eztools:latest -f eztools-all/Dockerfile .
+}
+
+resolve() {
+  local want
+  want="$(lc "$1")"
+  case "${want}" in
+    prefetch|pecmd) build_prefetch; return ;;
+    esedump|srum|srumecmd|sumecmd) build_esedump; return ;;
+    all-in-one|eztools|all) build_all_in_one; return ;;
+    vscmount)
+      echo "VSCMount manipulates the Windows VSS device namespace and has no" >&2
+      echo "Linux container; use libvshadow (vshadowinfo/vshadowmount) on the host." >&2
+      exit 1 ;;
+  esac
+  local tool
+  for tool in "${LINUX_TOOLS[@]}"; do
+    if [ "$(lc "${tool}")" = "${want}" ]; then
+      build_eztool "${tool}"
+      return
+    fi
+  done
+  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} prefetch esedump all-in-one" >&2
+  exit 1
+}
+
+if [ "$#" -gt 0 ]; then
+  for arg in "$@"; do resolve "${arg}"; done
+else
+  for tool in "${LINUX_TOOLS[@]}"; do build_eztool "${tool}"; done
+  build_prefetch
+  build_esedump
+fi
+echo "done."

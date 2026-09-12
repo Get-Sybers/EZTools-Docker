@@ -1,6 +1,6 @@
 module github.com/Get-Sybers/EZTools-Docker/srum
 
-go 1.24.7
+go 1.24
 
 require (
 	github.com/Velocidex/ordereddict v0.0.0-20220107075049-3dbe58412844

@@ -1,3 +1,3 @@
 module github.com/Get-Sybers/EZTools-Docker/eztools-all/launcher
 
-go 1.24.7
+go 1.24

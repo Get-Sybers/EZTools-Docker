@@ -85,11 +85,22 @@ ARG DFIR_UID=2000
 ARG DFIR_GID=2000
 COPY --from=fetch /opt/eztools /opt/eztools
 COPY --from=launcher /eztool /usr/local/bin/eztool
-# Build-time smoke: every baked tool must at least start and print help.
+# Build-time smoke: every baked tool must start through the launcher and
+# produce help output. Exit codes alone are useless here (some EZ tools exit
+# non-zero on --help, and the Windows-only ones exit 0 while refusing), so
+# the build FAILS on silence or on the known fatal/platform signatures —
+# which also catches a Windows-only tool sneaking into the EZTOOLS list.
 RUN set -eux; \
     for dir in /opt/eztools/*/; do \
         tool="$(basename "${dir}")"; \
-        /usr/local/bin/eztool "${tool}" --help > /dev/null || true; \
+        out="$(/usr/local/bin/eztool "${tool}" --help 2>&1 || true)"; \
+        if [ -z "${out}" ]; then \
+            echo "SMOKE FAILED: ${tool} produced no output" >&2; exit 1; \
+        fi; \
+        if printf '%s' "${out}" | grep -Eiq \
+            'You must install or update \.NET|No frameworks were found|Unhandled exception|A fatal error occurred|Non-Windows platforms not supported'; then \
+            echo "SMOKE FAILED: ${tool}:" >&2; printf '%s\n' "${out}" | head -5 >&2; exit 1; \
+        fi; \
     done
 COPY hardening/harden.yml /tmp/hardening/harden.yml
 RUN set -eux; \

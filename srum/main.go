@@ -433,8 +433,7 @@ func processDb(path, sourceDb, jsonDir, csvDir, tablesFlag string,
 			}
 			if found == "" {
 				if strictTables {
-					fmt.Fprintf(os.Stderr, "ese_dump: table %q not found (use --list)\n", want)
-					os.Exit(1)
+					return 0, fmt.Errorf("table %q not found (use --list)", want)
 				}
 				fmt.Fprintf(os.Stderr, "ese_dump: %s: table %q not present, skipping\n", sourceDb, want)
 				continue

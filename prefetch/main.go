@@ -91,9 +91,15 @@ func collectInputs(file, dir string) ([]string, error) {
 		return []string{file}, nil
 	}
 	var out []string
+	// Unreadable subtrees are skipped with a note, not fatal — mounted disk
+	// image roots routinely contain them, especially rootless.
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "prefetch_dump: skipping unreadable %s: %v\n", p, err)
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".pf") {
 			out = append(out, p)

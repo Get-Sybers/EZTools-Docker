@@ -24,7 +24,9 @@
 # RunCount, LastRun, PreviousRuns, FilesAccessed. See prefetch/main.go for the
 # PECmd field mapping notes.
 
-ARG GO_VERSION=1.24
+# go-prefetch requires go >= 1.25 (module directive), and the official golang
+# images set GOTOOLCHAIN=local, so the builder must be at least 1.25 itself.
+ARG GO_VERSION=1.25
 
 FROM golang:${GO_VERSION}-alpine AS build
 WORKDIR /src

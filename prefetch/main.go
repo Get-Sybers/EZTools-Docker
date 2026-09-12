@@ -92,9 +92,13 @@ func collectInputs(file, dir string) ([]string, error) {
 	}
 	var out []string
 	// Unreadable subtrees are skipped with a note, not fatal — mounted disk
-	// image roots routinely contain them, especially rootless.
+	// image roots routinely contain them, especially rootless. A root that
+	// cannot be read at all IS fatal: "no .pf files found" would mislead.
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if p == dir {
+				return err
+			}
 			fmt.Fprintf(os.Stderr, "prefetch_dump: skipping unreadable %s: %v\n", p, err)
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
@@ -170,8 +174,11 @@ func main() {
 
 	if *csvDir != "" {
 		cw = csv.NewWriter(w)
-		_ = cw.Write([]string{"SourceFilename", "SourceModified", "Executable", "Path",
-			"Hash", "Version", "FileSize", "RunCount", "LastRun", "PreviousRuns", "FilesAccessed"})
+		if err := cw.Write([]string{"SourceFilename", "SourceModified", "Executable", "Path",
+			"Hash", "Version", "FileSize", "RunCount", "LastRun", "PreviousRuns", "FilesAccessed"}); err != nil {
+			fmt.Fprintf(os.Stderr, "prefetch_dump: write: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	enc := json.NewEncoder(w)
@@ -184,10 +191,13 @@ func main() {
 			continue
 		}
 		if cw != nil {
-			_ = cw.Write([]string{rec.SourceFilename, rec.SourceModified, rec.Executable,
+			if err := cw.Write([]string{rec.SourceFilename, rec.SourceModified, rec.Executable,
 				rec.Path, rec.Hash, rec.Version, strconv.FormatUint(uint64(rec.FileSize), 10),
 				strconv.FormatUint(uint64(rec.RunCount), 10), rec.LastRun,
-				strings.Join(rec.PreviousRuns, "|"), strings.Join(rec.FilesAccessed, "|")})
+				strings.Join(rec.PreviousRuns, "|"), strings.Join(rec.FilesAccessed, "|")}); err != nil {
+				fmt.Fprintf(os.Stderr, "prefetch_dump: write: %v\n", err)
+				os.Exit(1)
+			}
 		} else if err := enc.Encode(rec); err != nil {
 			fmt.Fprintf(os.Stderr, "prefetch_dump: write: %v\n", err)
 			os.Exit(1)

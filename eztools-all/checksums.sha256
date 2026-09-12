@@ -1,0 +1,9 @@
+# Optional release pins for the all-in-one image, verified by the fetch stage.
+# One line per tool in sha256sum format (64 hex chars, two spaces, zip
+# basename), for example:
+#
+#   0123456789abcdef...  <name-of-tool-zip>
+#
+# Only lines starting with a full 64-hex digest are honoured; tools without a
+# matching line are fetched unpinned. Eric's releases move without version
+# markers in the URL, so refresh pins deliberately when updating.

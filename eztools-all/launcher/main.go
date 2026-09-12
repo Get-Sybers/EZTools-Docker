@@ -45,6 +45,9 @@ func env(key, def string) string {
 func listTools(root string) []string {
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		// An unreadable tool root would otherwise present as "no tools" —
+		// surface the real cause for diagnosability.
+		fmt.Fprintf(os.Stderr, "eztool: cannot read tool root %s: %v\n", root, err)
 		return nil
 	}
 	var tools []string

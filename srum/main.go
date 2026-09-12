@@ -318,11 +318,15 @@ type dbHit struct {
 // every SRUM database (SRUDB.dat) and SUM database (*.mdb whose immediate
 // parent directory is SUM/), matched case-insensitively. Unreadable
 // subtrees are skipped with a note, not fatal — disk image mounts routinely
-// contain them.
-func findDatabases(root string) []dbHit {
+// contain them. A root that cannot be read at all IS an error: reporting
+// "no databases found" for a missing mount would mislead.
+func findDatabases(root string) ([]dbHit, error) {
 	var hits []dbHit
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if p == root {
+				return err
+			}
 			fmt.Fprintf(os.Stderr, "ese_dump: skipping unreadable %s: %v\n", p, err)
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
@@ -343,7 +347,7 @@ func findDatabases(root string) []dbHit {
 		return nil
 	})
 	sort.Slice(hits, func(i, j int) bool { return hits[i].path < hits[j].path })
-	return hits
+	return hits, err
 }
 
 // dbSubdir builds a stable per-database output directory name like
@@ -497,7 +501,11 @@ func main() {
 
 	// Mode 1: a mounted disk image root — find every SRUM/SUM database and
 	// dump each into its own sub-directory (SRUM_SRUDB/, SUM_Current/, ...).
-	hits := findDatabases(*root)
+	hits, err := findDatabases(*root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ese_dump: cannot scan %s: %v\n", *root, err)
+		os.Exit(1)
+	}
 	if len(hits) == 0 {
 		fmt.Fprintf(os.Stderr, "ese_dump: no SRUM or SUM databases found under %s\n", *root)
 		os.Exit(1)

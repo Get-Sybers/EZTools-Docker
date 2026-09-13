@@ -1,4 +1,4 @@
-module github.com/Get-Sybers/EZTools-Docker/prefetch
+module github.com/Get-Sybers/GoDFIR-toolz/goprefetch
 
 go 1.25
 

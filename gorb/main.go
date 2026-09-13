@@ -1,4 +1,4 @@
-// rbcmd — Linux-native Windows Recycle Bin ($I) parser for the DX_DFIR pipeline.
+// gorb — Linux-native Windows Recycle Bin ($I) parser for the DX_DFIR pipeline.
 //
 // A static-Go substitute for Eric Zimmerman's RBCmd: it parses the modern
 // Recycle Bin metadata files ($I<id>, one per deleted item, that pair with the
@@ -164,7 +164,7 @@ func collectInputs(file, dir string) ([]string, error) {
 			if p == dir {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "rbcmd: skipping unreadable %s: %v\n", p, err)
+			fmt.Fprintf(os.Stderr, "gorb: skipping unreadable %s: %v\n", p, err)
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}
@@ -205,7 +205,7 @@ func main() {
 	flag.Parse()
 
 	if (*file == "") == (*dir == "") {
-		fmt.Fprintln(os.Stderr, "rbcmd: exactly one of -f <file> or -d <dir> is required")
+		fmt.Fprintln(os.Stderr, "gorb: exactly one of -f <file> or -d <dir> is required")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -213,11 +213,11 @@ func main() {
 	dirMode := *dir != ""
 	inputs, err := collectInputs(*file, *dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "rbcmd: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gorb: %v\n", err)
 		os.Exit(1)
 	}
 	if len(inputs) == 0 {
-		fmt.Fprintln(os.Stderr, "rbcmd: no files found")
+		fmt.Fprintln(os.Stderr, "gorb: no files found")
 		os.Exit(1)
 	}
 
@@ -229,7 +229,7 @@ func main() {
 		w, err = openOut(*jsonDir, *jsonF, "RBCmd_Output.jsonl")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "rbcmd: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gorb: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
@@ -241,7 +241,7 @@ func main() {
 	if *csvDir != "" {
 		cw = csv.NewWriter(w)
 		if err := cw.Write([]string{"SourceName", "FileType", "FileName", "FileSize", "DeletedOn"}); err != nil {
-			fmt.Fprintf(os.Stderr, "rbcmd: write: %v\n", err)
+			fmt.Fprintf(os.Stderr, "gorb: write: %v\n", err)
 			os.Exit(1)
 		}
 	}
@@ -260,39 +260,39 @@ func main() {
 		rec, err := parseOne(p)
 		if err != nil {
 			failed++
-			fmt.Fprintf(os.Stderr, "rbcmd: FAILED %s: %v\n", p, err)
+			fmt.Fprintf(os.Stderr, "gorb: FAILED %s: %v\n", p, err)
 			continue
 		}
 		emitted++
 		if cw != nil {
 			if err := cw.Write([]string{rec.SourceName, rec.FileType, rec.FileName,
 				strconv.FormatInt(rec.FileSize, 10), rec.DeletedOn}); err != nil {
-				fmt.Fprintf(os.Stderr, "rbcmd: write: %v\n", err)
+				fmt.Fprintf(os.Stderr, "gorb: write: %v\n", err)
 				os.Exit(1)
 			}
 		} else if err := enc.Encode(rec); err != nil {
-			fmt.Fprintf(os.Stderr, "rbcmd: write: %v\n", err)
+			fmt.Fprintf(os.Stderr, "gorb: write: %v\n", err)
 			os.Exit(1)
 		}
 		if !*quiet {
-			fmt.Fprintf(os.Stderr, "rbcmd: parsed %s (%s, %d bytes)\n", p, rec.FileName, rec.FileSize)
+			fmt.Fprintf(os.Stderr, "gorb: parsed %s (%s, %d bytes)\n", p, rec.FileName, rec.FileSize)
 		}
 	}
 	if cw != nil {
 		cw.Flush()
 		if err := cw.Error(); err != nil {
-			fmt.Fprintf(os.Stderr, "rbcmd: write: %v\n", err)
+			fmt.Fprintf(os.Stderr, "gorb: write: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	// A directory scan that matched no $I records is worth flagging (an empty
 	// Recycle Bin, or a wrong -d) but is not an error on its own.
 	if dirMode && emitted == 0 && failed == 0 {
-		fmt.Fprintf(os.Stderr, "rbcmd: no $I records found under %s\n", *dir)
+		fmt.Fprintf(os.Stderr, "gorb: no $I records found under %s\n", *dir)
 		os.Exit(1)
 	}
 	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "rbcmd: %d $I record(s) failed to parse\n", failed)
+		fmt.Fprintf(os.Stderr, "gorb: %d $I record(s) failed to parse\n", failed)
 		os.Exit(2)
 	}
 }

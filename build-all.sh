@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
 # Build the hardened DFIR images: one per-tool image per Linux-viable EZ tool
-# (eztool/Dockerfile), the Go substitute images (prefetch/, srum/, rbcmd/), and —
-# on request — the all-in-one image (eztools-all/).
+# still on .NET (eztool/Dockerfile), the GoDFIR Go tools (goprefetch/, goese/,
+# gorb/), and — on request — the all-in-one image (eztools-all/).
 #
-#   ./build-all.sh                 # every per-tool image + prefetch + esedump + rbcmd
+#   ./build-all.sh                 # every .NET per-tool image + goprefetch + goese + gorb
 #   ./build-all.sh recmd mftecmd   # a subset (names case-insensitive)
 #   ./build-all.sh all-in-one      # the single get-sybers/eztools image
-#   ./build-all.sh prefetch esedump rbcmd
+#   ./build-all.sh goprefetch goese gorb
 #
-# PECmd, SrumECmd, SumECmd and VSCMount are not in the list on purpose: they
-# cannot parse artifacts on Linux (see README). prefetch and esedump are their
-# Linux substitutes. RBCmd is Linux-viable under .NET but is ported to a static
-# Go binary (rbcmd/) to drop the .NET runtime — the $I format is simple and
-# fully specified (DX_DFIR #188 initiative 2).
+# PECmd, SrumECmd, SumECmd and VSCMount cannot parse artifacts on Linux (see
+# README): goprefetch and goese are their Go substitutes. gorb replaces RBCmd
+# (Linux-viable under .NET) with a static Go binary to drop the .NET runtime.
+# As each remaining .NET tool is ported to Go it gets a go-name too (RECmd ->
+# gore, EvtxECmd -> goevtx, MFTECmd -> gomft, ...) — DX_DFIR #188 initiative 2.
 set -Eeuo pipefail
 cd "$(dirname "$0")"
 
@@ -33,19 +33,19 @@ build_eztool() {
     --build-arg EZTOOL="${tool}" -f eztool/Dockerfile .
 }
 
-build_prefetch() {
-  echo "==> get-sybers/prefetch (Go, PECmd substitute)"
-  docker build -t get-sybers/prefetch:latest -f prefetch/Dockerfile prefetch
+build_goprefetch() {
+  echo "==> get-sybers/goprefetch (Go, PECmd substitute)"
+  docker build -t get-sybers/goprefetch:latest -f goprefetch/Dockerfile goprefetch
 }
 
-build_esedump() {
-  echo "==> get-sybers/esedump (Go, SrumECmd/SumECmd substitute)"
-  docker build -t get-sybers/esedump:latest -f srum/Dockerfile srum
+build_goese() {
+  echo "==> get-sybers/goese (Go, SrumECmd/SumECmd substitute)"
+  docker build -t get-sybers/goese:latest -f goese/Dockerfile goese
 }
 
-build_rbcmd() {
-  echo "==> get-sybers/rbcmd (Go, RBCmd substitute)"
-  docker build -t get-sybers/rbcmd:latest -f rbcmd/Dockerfile rbcmd
+build_gorb() {
+  echo "==> get-sybers/gorb (Go, RBCmd substitute)"
+  docker build -t get-sybers/gorb:latest -f gorb/Dockerfile gorb
 }
 
 build_all_in_one() {
@@ -57,9 +57,9 @@ resolve() {
   local want
   want="$(lc "$1")"
   case "${want}" in
-    prefetch|pecmd) build_prefetch; return ;;
-    esedump|srum|srumecmd|sumecmd) build_esedump; return ;;
-    rbcmd) build_rbcmd; return ;;
+    goprefetch|prefetch|pecmd) build_goprefetch; return ;;
+    goese|esedump|srum|srumecmd|sumecmd) build_goese; return ;;
+    gorb|rbcmd) build_gorb; return ;;
     all-in-one|eztools|all) build_all_in_one; return ;;
     vscmount)
       echo "VSCMount manipulates the Windows VSS device namespace and has no" >&2
@@ -73,7 +73,7 @@ resolve() {
       return
     fi
   done
-  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} prefetch esedump rbcmd all-in-one" >&2
+  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb all-in-one" >&2
   exit 1
 }
 
@@ -81,8 +81,8 @@ if [ "$#" -gt 0 ]; then
   for arg in "$@"; do resolve "${arg}"; done
 else
   for tool in "${LINUX_TOOLS[@]}"; do build_eztool "${tool}"; done
-  build_prefetch
-  build_esedump
-  build_rbcmd
+  build_goprefetch
+  build_goese
+  build_gorb
 fi
 echo "done."

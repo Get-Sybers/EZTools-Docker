@@ -1,4 +1,4 @@
-// prefetch_dump — Linux-native Windows Prefetch parser for the DX_DFIR pipeline.
+// goprefetch — Linux-native Windows Prefetch parser for the DX_DFIR pipeline.
 //
 // PECmd cannot run on non-Windows hosts: its startup guard exits ("Non-Windows
 // platforms not supported due to the need to load decompression specific
@@ -99,7 +99,7 @@ func collectInputs(file, dir string) ([]string, error) {
 			if p == dir {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "prefetch_dump: skipping unreadable %s: %v\n", p, err)
+			fmt.Fprintf(os.Stderr, "goprefetch: skipping unreadable %s: %v\n", p, err)
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}
@@ -140,18 +140,18 @@ func main() {
 	flag.Parse()
 
 	if (*file == "") == (*dir == "") {
-		fmt.Fprintln(os.Stderr, "prefetch_dump: exactly one of -f <file> or -d <dir> is required")
+		fmt.Fprintln(os.Stderr, "goprefetch: exactly one of -f <file> or -d <dir> is required")
 		flag.Usage()
 		os.Exit(1)
 	}
 
 	inputs, err := collectInputs(*file, *dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "prefetch_dump: %v\n", err)
+		fmt.Fprintf(os.Stderr, "goprefetch: %v\n", err)
 		os.Exit(1)
 	}
 	if len(inputs) == 0 {
-		fmt.Fprintln(os.Stderr, "prefetch_dump: no .pf files found")
+		fmt.Fprintln(os.Stderr, "goprefetch: no .pf files found")
 		os.Exit(1)
 	}
 
@@ -163,7 +163,7 @@ func main() {
 		w, err = openOut(*jsonDir, *jsonF, "PrefetchDump_Output.jsonl")
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "prefetch_dump: %v\n", err)
+		fmt.Fprintf(os.Stderr, "goprefetch: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
@@ -176,7 +176,7 @@ func main() {
 		cw = csv.NewWriter(w)
 		if err := cw.Write([]string{"SourceFilename", "SourceModified", "Executable", "Path",
 			"Hash", "Version", "FileSize", "RunCount", "LastRun", "PreviousRuns", "FilesAccessed"}); err != nil {
-			fmt.Fprintf(os.Stderr, "prefetch_dump: write: %v\n", err)
+			fmt.Fprintf(os.Stderr, "goprefetch: write: %v\n", err)
 			os.Exit(1)
 		}
 	}
@@ -187,7 +187,7 @@ func main() {
 		rec, err := parseOne(p)
 		if err != nil {
 			failed++
-			fmt.Fprintf(os.Stderr, "prefetch_dump: FAILED %s: %v\n", p, err)
+			fmt.Fprintf(os.Stderr, "goprefetch: FAILED %s: %v\n", p, err)
 			continue
 		}
 		if cw != nil {
@@ -195,27 +195,27 @@ func main() {
 				rec.Path, rec.Hash, rec.Version, strconv.FormatUint(uint64(rec.FileSize), 10),
 				strconv.FormatUint(uint64(rec.RunCount), 10), rec.LastRun,
 				strings.Join(rec.PreviousRuns, "|"), strings.Join(rec.FilesAccessed, "|")}); err != nil {
-				fmt.Fprintf(os.Stderr, "prefetch_dump: write: %v\n", err)
+				fmt.Fprintf(os.Stderr, "goprefetch: write: %v\n", err)
 				os.Exit(1)
 			}
 		} else if err := enc.Encode(rec); err != nil {
-			fmt.Fprintf(os.Stderr, "prefetch_dump: write: %v\n", err)
+			fmt.Fprintf(os.Stderr, "goprefetch: write: %v\n", err)
 			os.Exit(1)
 		}
 		if !*quiet {
-			fmt.Fprintf(os.Stderr, "prefetch_dump: parsed %s (%s, run count %d)\n",
+			fmt.Fprintf(os.Stderr, "goprefetch: parsed %s (%s, run count %d)\n",
 				p, rec.Version, rec.RunCount)
 		}
 	}
 	if cw != nil {
 		cw.Flush()
 		if err := cw.Error(); err != nil {
-			fmt.Fprintf(os.Stderr, "prefetch_dump: write: %v\n", err)
+			fmt.Fprintf(os.Stderr, "goprefetch: write: %v\n", err)
 			os.Exit(1)
 		}
 	}
 	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "prefetch_dump: %d of %d files failed\n", failed, len(inputs))
+		fmt.Fprintf(os.Stderr, "goprefetch: %d of %d files failed\n", failed, len(inputs))
 		os.Exit(2)
 	}
 }

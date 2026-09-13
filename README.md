@@ -1,4 +1,4 @@
-# EZTools-Docker
+# GoDFIR-toolz
 
 **Minimal hardened Docker images for Eric Zimmerman's forensic tools, built to
 actually parse artefacts on Linux** — no shell, no python, no package manager,
@@ -20,15 +20,15 @@ artefacts natively.
 | JLECmd | `get-sybers/jlecmd` | ✅ parse-verified |
 | LECmd | `get-sybers/lecmd` | ✅ parse-verified |
 | MFTECmd | `get-sybers/mftecmd` | ✅ parse-verified |
-| **PECmd** | **`get-sybers/prefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `prefetch_dump` parses XP→Win11 `.pf` natively, MAM-compressed included |
-| **RBCmd** | **`get-sybers/rbcmd` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary to drop the .NET runtime — parses v1/v2 `$I` records |
+| **PECmd** | **`get-sybers/goprefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `goprefetch` parses XP→Win11 `.pf` natively, MAM-compressed included |
+| **RBCmd** | **`get-sybers/gorb` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary to drop the .NET runtime — parses v1/v2 `$I` records |
 | RecentFileCacheParser | `get-sybers/recentfilecacheparser` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
 | RECmd | `get-sybers/recmd` | ✅ parse-verified (BatchExamples/ baked in) |
 | RLA | `get-sybers/rla` | ☑️ pure managed .NET (same Registry library whose LOG replay already works on Linux via AppCompatCacheParser/SBECmd) |
 | SBECmd | `get-sybers/sbecmd` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
 | SQLECmd | `get-sybers/sqlecmd` | ✅ parse-verified (Maps/ baked in) |
-| **SrumECmd** | **`get-sybers/esedump` (Go substitute)** | ❌ SrumECmd cannot parse on Linux → `ese_dump` parses SRUDB.dat natively with IdMap/SID enrichment |
-| **SumECmd** | **`get-sybers/esedump` (Go substitute)** | ❌ SumECmd cannot parse on Linux → `ese_dump` reads SUM `Current.mdb` (any ESE database) |
+| **SrumECmd** | **`get-sybers/goese` (Go substitute)** | ❌ SrumECmd cannot parse on Linux → `goese` parses SRUDB.dat natively with IdMap/SID enrichment |
+| **SumECmd** | **`get-sybers/goese` (Go substitute)** | ❌ SumECmd cannot parse on Linux → `goese` reads SUM `Current.mdb` (any ESE database) |
 | **VSCMount** | *(no container possible)* | ❌ manipulates the Windows VSS device namespace; on Linux use libvshadow (`vshadowinfo`/`vshadowmount`) on the host |
 | WxTCmd | `get-sybers/wxtcmd` / all-in-one launcher | ✅ parse-verified — needs a writable exec `/tmp` (see below) |
 
@@ -60,7 +60,7 @@ release), and this repo ships native substitutes instead:
 
 ## The Go substitutes (FROM scratch, a few MB, no runtime at all)
 
-### `get-sybers/prefetch` — prefetch_dump (replaces PECmd)
+### `get-sybers/goprefetch` — goprefetch (replaces PECmd)
 
 Static Go binary on Velociraptor's `go-prefetch`, whose pure-Go
 LZXpress-Huffman implementation decompresses Win8+/Win10/Win11 MAM prefetch on
@@ -69,10 +69,10 @@ Win10 and Win11 `.pf` files — all four MAM-compressed samples included — par
 correctly on Linux.
 
 ```sh
-docker build -t get-sybers/prefetch:latest -f prefetch/Dockerfile prefetch
+docker build -t get-sybers/goprefetch:latest -f goprefetch/Dockerfile goprefetch
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  get-sybers/prefetch:latest -d /input --json /output
+  get-sybers/goprefetch:latest -d /input --json /output
 ```
 
 JSONL (or `--csv`) per file: `SourceFilename`, `Executable`, `Path`, `Hash`,
@@ -80,7 +80,7 @@ JSONL (or `--csv`) per file: `SourceFilename`, `Executable`, `Path`, `Hash`,
 `FilesAccessed`. Volume info blocks are the one PECmd output section not
 emitted (not exposed by the library).
 
-### `get-sybers/esedump` — ese_dump (replaces SrumECmd and SumECmd)
+### `get-sybers/goese` — goese (replaces SrumECmd and SumECmd)
 
 Static Go binary on Velociraptor's `go-ese` (pure-Go ESE). Verified in this
 repo against a real 7.8 MB `SRUDB.dat`: all provider tables dumped (16k+ rows
@@ -93,13 +93,13 @@ provider GUID tables get friendly output names (`ApplicationResourceUsage`,
 any ESE database — the same way (`--list` shows tables).
 
 ```sh
-docker build -t get-sybers/esedump:latest -f srum/Dockerfile srum
+docker build -t get-sybers/goese:latest -f goese/Dockerfile goese
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  get-sybers/esedump:latest -f /input/SRUDB.dat --json /output
+  get-sybers/goese:latest -f /input/SRUDB.dat --json /output
 ```
 
-### `get-sybers/rbcmd` — rbcmd (replaces RBCmd)
+### `get-sybers/gorb` — gorb (replaces RBCmd)
 
 Unlike PECmd/SrumECmd/SumECmd, RBCmd *does* parse on Linux under .NET — this
 substitute exists to drop the .NET runtime, not to work around a Windows-only guard (the
@@ -118,10 +118,10 @@ and running this image over the result recovers the deleted-file path, size and
 deletion time.
 
 ```sh
-docker build -t get-sybers/rbcmd:latest -f rbcmd/Dockerfile rbcmd
+docker build -t get-sybers/gorb:latest -f gorb/Dockerfile gorb
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  get-sybers/rbcmd:latest -d /input --csv /output --csvf rbcmd.csv
+  get-sybers/gorb:latest -d /input --csv /output --csvf gorb.csv
 ```
 
 All three images are `FROM scratch`: one static binary, no shell, no python, no
@@ -196,8 +196,8 @@ both:
 
 1. **A mounted disk image** — mount the image on the host (ewfmount/losetup +
    mount, or your image-export stage) and bind the filesystem root read-only
-   into the container. `prefetch_dump -d /image` walks the whole tree for
-   `*.pf`; `ese_dump -d /image` finds every SRUM database (`SRUDB.dat`) and
+   into the container. `goprefetch -d /image` walks the whole tree for
+   `*.pf`; `goese -d /image` finds every SRUM database (`SRUDB.dat`) and
    SUM database (`*.mdb` under a `SUM/` directory) case-insensitively and
    dumps each into its own sub-directory (`SRUM_SRUDB/`, `SUM_Current/`, …)
    with a `SourceDb` field on every row. The .NET tools that take `-d`
@@ -255,7 +255,7 @@ what the DX_DFIR pipeline's image role does after every build.
 - **iisGeolocate**: keep its MaxMind `.mmdb` databases current — mount them
   read-only over the baked copies if the release's are stale.
 - **Prefetch on Windows hosts**: PECmd remains the reference parser *on
-  Windows*; `get-sybers/prefetch` exists because Linux pipelines otherwise had to
+  Windows*; `get-sybers/goprefetch` exists because Linux pipelines otherwise had to
   fall back to Plaso for `.pf`.
 
 ## License

@@ -1,4 +1,4 @@
-// ese_dump — Linux-native ESE database dumper (SRUM / SUM) for the DX_DFIR
+// goese — Linux-native ESE database dumper (SRUM / SUM) for the DX_DFIR
 // pipeline.
 //
 // SrumECmd and SumECmd cannot run on non-Windows hosts: both read ESE
@@ -177,7 +177,7 @@ func loadIdMap(cat *parser.Catalog) map[int64]idEntry {
 		return nil
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ese_dump: SruDbIdMapTable read failed, continuing without enrichment: %v\n", err)
+		fmt.Fprintf(os.Stderr, "goese: SruDbIdMapTable read failed, continuing without enrichment: %v\n", err)
 		return nil
 	}
 	return m
@@ -327,7 +327,7 @@ func findDatabases(root string) ([]dbHit, error) {
 			if p == root {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "ese_dump: skipping unreadable %s: %v\n", p, err)
+			fmt.Fprintf(os.Stderr, "goese: skipping unreadable %s: %v\n", p, err)
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}
@@ -439,7 +439,7 @@ func processDb(path, sourceDb, jsonDir, csvDir, tablesFlag string,
 				if strictTables {
 					return 0, fmt.Errorf("table %q not found (use --list)", want)
 				}
-				fmt.Fprintf(os.Stderr, "ese_dump: %s: table %q not present, skipping\n", sourceDb, want)
+				fmt.Fprintf(os.Stderr, "goese: %s: table %q not present, skipping\n", sourceDb, want)
 				continue
 			}
 			selected = append(selected, found)
@@ -448,7 +448,7 @@ func processDb(path, sourceDb, jsonDir, csvDir, tablesFlag string,
 
 	idMap := loadIdMap(cat)
 	if idMap != nil && !quiet {
-		fmt.Fprintf(os.Stderr, "ese_dump: %s: SRUM id map loaded (%d entries) — AppIdName/UserIdName enrichment on\n",
+		fmt.Fprintf(os.Stderr, "goese: %s: SRUM id map loaded (%d entries) — AppIdName/UserIdName enrichment on\n",
 			path, len(idMap))
 	}
 
@@ -457,11 +457,11 @@ func processDb(path, sourceDb, jsonDir, csvDir, tablesFlag string,
 		rows, err := dumpTable(cat, table, idMap, jsonDir, csvDir, sourceDb)
 		if err != nil {
 			failed++
-			fmt.Fprintf(os.Stderr, "ese_dump: FAILED %s after %d rows: %v\n", label(table), rows, err)
+			fmt.Fprintf(os.Stderr, "goese: FAILED %s after %d rows: %v\n", label(table), rows, err)
 			continue
 		}
 		if !quiet {
-			fmt.Fprintf(os.Stderr, "ese_dump: dumped %s (%d rows)\n", label(table), rows)
+			fmt.Fprintf(os.Stderr, "goese: dumped %s (%d rows)\n", label(table), rows)
 		}
 	}
 	return failed, nil
@@ -480,7 +480,7 @@ func main() {
 	flag.Parse()
 
 	if (*file == "") == (*root == "") {
-		fmt.Fprintln(os.Stderr, "ese_dump: exactly one of -f <database> or -d <root> is required")
+		fmt.Fprintln(os.Stderr, "goese: exactly one of -f <database> or -d <root> is required")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -489,11 +489,11 @@ func main() {
 	if *file != "" {
 		failed, err := processDb(*file, "", *jsonDir, *csvDir, *tables, *list, true, *quiet)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ese_dump: %s: %v\n", *file, err)
+			fmt.Fprintf(os.Stderr, "goese: %s: %v\n", *file, err)
 			os.Exit(1)
 		}
 		if failed > 0 {
-			fmt.Fprintf(os.Stderr, "ese_dump: %d tables failed\n", failed)
+			fmt.Fprintf(os.Stderr, "goese: %d tables failed\n", failed)
 			os.Exit(2)
 		}
 		return
@@ -503,11 +503,11 @@ func main() {
 	// dump each into its own sub-directory (SRUM_SRUDB/, SUM_Current/, ...).
 	hits, err := findDatabases(*root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ese_dump: cannot scan %s: %v\n", *root, err)
+		fmt.Fprintf(os.Stderr, "goese: cannot scan %s: %v\n", *root, err)
 		os.Exit(1)
 	}
 	if len(hits) == 0 {
-		fmt.Fprintf(os.Stderr, "ese_dump: no SRUM or SUM databases found under %s\n", *root)
+		fmt.Fprintf(os.Stderr, "goese: no SRUM or SUM databases found under %s\n", *root)
 		os.Exit(1)
 	}
 	used := map[string]int{}
@@ -526,18 +526,18 @@ func main() {
 			cd = filepath.Join(cd, sub)
 		}
 		if !*quiet {
-			fmt.Fprintf(os.Stderr, "ese_dump: %s database %s -> %s\n", hit.kind, rel, sub)
+			fmt.Fprintf(os.Stderr, "goese: %s database %s -> %s\n", hit.kind, rel, sub)
 		}
 		ft, err := processDb(hit.path, rel, jd, cd, *tables, *list, false, *quiet)
 		if err != nil {
 			failedDbs++
-			fmt.Fprintf(os.Stderr, "ese_dump: FAILED %s: %v\n", rel, err)
+			fmt.Fprintf(os.Stderr, "goese: FAILED %s: %v\n", rel, err)
 			continue
 		}
 		failedTables += ft
 	}
 	if failedDbs > 0 || failedTables > 0 {
-		fmt.Fprintf(os.Stderr, "ese_dump: %d databases and %d tables failed\n", failedDbs, failedTables)
+		fmt.Fprintf(os.Stderr, "goese: %d databases and %d tables failed\n", failedDbs, failedTables)
 		os.Exit(2)
 	}
 }

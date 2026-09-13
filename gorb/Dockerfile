@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# rbcmd — Linux-native Windows Recycle Bin ($I) parser, a static-Go substitute
+# gorb — Linux-native Windows Recycle Bin ($I) parser, a static-Go substitute
 # for Eric Zimmerman's RBCmd (.NET) for the DX_DFIR pipeline.
 #
 # RBCmd runs under the .NET runtime; this image replaces it with a single static
@@ -15,10 +15,10 @@
 # hardening contract is met by construction — no shell, no python, no package
 # manager, no setuid, no libc; runs as uid 2000.
 #
-#   docker build -t get-sybers/rbcmd:latest -f rbcmd/Dockerfile rbcmd
+#   docker build -t get-sybers/gorb:latest -f gorb/Dockerfile gorb
 #   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
 #     --network none --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-#     get-sybers/rbcmd:latest -d /input --csv /output --csvf rbcmd.csv
+#     get-sybers/gorb:latest -d /input --csv /output --csvf rbcmd.csv
 
 ARG GO_VERSION=1.24
 
@@ -27,14 +27,14 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY main.go .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /rbcmd .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /gorb .
 # Sanity-gate the build: the binary must run and exit 1 (its usage code) with no
 # args. Any other outcome — a panic, a crash, or an unexpected 0/2 — fails the
 # build here rather than shipping a broken binary.
-RUN /rbcmd 2>/dev/null; [ $? -eq 1 ]
+RUN /gorb 2>/dev/null; [ $? -eq 1 ]
 
 FROM scratch
-COPY --from=build /rbcmd /rbcmd
+COPY --from=build /gorb /gorb
 COPY <<EOF /etc/dfir-hardened
 user=dfir uid=2000
 static_binary=true
@@ -44,10 +44,10 @@ EOF
 ARG DFIR_UID=2000
 ARG DFIR_GID=2000
 USER ${DFIR_UID}:${DFIR_GID}
-ENTRYPOINT ["/rbcmd"]
-LABEL org.opencontainers.image.title="get-sybers/rbcmd" \
+ENTRYPOINT ["/gorb"]
+LABEL org.opencontainers.image.title="get-sybers/gorb" \
       org.opencontainers.image.description="Linux-native Windows Recycle Bin (\$I) parser (static Go): parses v1 (Vista–8.0) and v2 (Win8.1/10/11) \$I metadata records to CSV/JSONL — a .NET-free substitute for RBCmd. FROM scratch: no shell, no python, no libc, runs as uid 2000." \
       org.opencontainers.image.licenses="MIT" \
-      com.get-sybers.eztool="rbcmd" \
+      com.get-sybers.eztool="gorb" \
       com.get-sybers.eztool.substitute-for="RBCmd" \
       com.get-sybers.hardened="true"

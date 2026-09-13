@@ -27,8 +27,11 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY main.go .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /rbcmd . \
-    && /rbcmd 2>/dev/null; [ $? -eq 1 ] || true
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /rbcmd .
+# Sanity-gate the build: the binary must run and exit 1 (its usage code) with no
+# args. Any other outcome — a panic, a crash, or an unexpected 0/2 — fails the
+# build here rather than shipping a broken binary.
+RUN /rbcmd 2>/dev/null; [ $? -eq 1 ]
 
 FROM scratch
 COPY --from=build /rbcmd /rbcmd

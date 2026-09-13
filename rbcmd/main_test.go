@@ -17,6 +17,13 @@ func filetimeOf(t time.Time) int64 {
 	return (t.Unix()+epochGap)*ticksPerSecond + int64(t.Nanosecond())/100
 }
 
+func mustWrite(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 func utf16le(s string) []byte {
 	u := utf16.Encode([]rune(s))
 	b := make([]byte, len(u)*2)
@@ -98,7 +105,7 @@ func TestParseRejectsUnknownVersionAndTruncation(t *testing.T) {
 	bad := make([]byte, 544)
 	binary.LittleEndian.PutUint64(bad[0:8], 99)
 	badPath := filepath.Join(dir, "$IBAD")
-	os.WriteFile(badPath, bad, 0o644)
+	mustWrite(t, badPath, bad)
 	if _, err := parseOne(badPath); err == nil {
 		t.Error("expected error for unknown version")
 	}
@@ -107,7 +114,7 @@ func TestParseRejectsUnknownVersionAndTruncation(t *testing.T) {
 	binary.LittleEndian.PutUint64(v2[0:8], 2)
 	binary.LittleEndian.PutUint32(v2[24:28], 999)
 	truncPath := filepath.Join(dir, "$ITRUNC")
-	os.WriteFile(truncPath, v2, 0o644)
+	mustWrite(t, truncPath, v2)
 	if _, err := parseOne(truncPath); err == nil {
 		t.Error("expected error for overrunning v2 name length")
 	}
@@ -116,7 +123,7 @@ func TestParseRejectsUnknownVersionAndTruncation(t *testing.T) {
 func TestCollectInputsMatchesDollarI(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"$IABC.txt", "$I999", "$RABC.txt", "notes.txt"} {
-		os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o644)
+		mustWrite(t, filepath.Join(dir, n), []byte("x"))
 	}
 	got, err := collectInputs("", dir)
 	if err != nil {

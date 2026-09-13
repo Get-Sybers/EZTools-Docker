@@ -101,8 +101,8 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
 
 ### `get-sybers/rbcmd` — rbcmd (replaces RBCmd)
 
-Unlike the three above, RBCmd *does* parse on Linux under .NET — this substitute
-exists to drop the .NET runtime, not to work around a Windows-only guard (the
+Unlike PECmd/SrumECmd/SumECmd, RBCmd *does* parse on Linux under .NET — this
+substitute exists to drop the .NET runtime, not to work around a Windows-only guard (the
 `$I` metadata format is simple and fully specified, so a static Go binary is a
 clean win; DX_DFIR #188 initiative 2). It parses the modern Recycle Bin `$I`
 records — v1 (Vista–8.0, fixed 260-wchar path) and v2 (Win8.1/10/11,

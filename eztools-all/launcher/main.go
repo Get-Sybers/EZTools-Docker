@@ -7,8 +7,8 @@
 // the remaining arguments — nothing else in the image is reachable through
 // the entrypoint.
 //
-//	docker run … dfir/eztools:latest EvtxECmd -f /input/Security.evtx --csv /output
-//	docker run … dfir/eztools:latest list
+//	docker run … get-sybers/eztools:latest EvtxECmd -f /input/Security.evtx --csv /output
+//	docker run … get-sybers/eztools:latest list
 //
 // Tools whose SQLite interop unpacks a native library next to the DLL
 // (WxTCmd) cannot run from the read-only /opt/eztools; for those the launcher

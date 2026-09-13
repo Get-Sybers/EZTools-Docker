@@ -12,25 +12,25 @@ artefacts natively.
 
 | Requested tool | Image | Linux status |
 | --- | --- | --- |
-| AmcacheParser | `dfir/amcacheparser` (or all-in-one) | ✅ parse-verified on real evidence |
-| AppCompatCacheParser | `dfir/appcompatcacheparser` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
-| bstrings | `dfir/bstrings` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
-| EvtxECmd | `dfir/evtxecmd` | ✅ parse-verified (Maps/ baked in) |
-| iisGeolocate | `dfir/iisgeolocate` | ☑️ pure managed .NET — mount/refresh its GeoLite2 `.mmdb` databases if the release doesn't bundle current ones |
-| JLECmd | `dfir/jlecmd` | ✅ parse-verified |
-| LECmd | `dfir/lecmd` | ✅ parse-verified |
-| MFTECmd | `dfir/mftecmd` | ✅ parse-verified |
-| **PECmd** | **`dfir/prefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `prefetch_dump` parses XP→Win11 `.pf` natively, MAM-compressed included |
-| RBCmd | `dfir/rbcmd` | ✅ parse-verified |
-| RecentFileCacheParser | `dfir/recentfilecacheparser` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
-| RECmd | `dfir/recmd` | ✅ parse-verified (BatchExamples/ baked in) |
-| RLA | `dfir/rla` | ☑️ pure managed .NET (same Registry library whose LOG replay already works on Linux via AppCompatCacheParser/SBECmd) |
-| SBECmd | `dfir/sbecmd` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
-| SQLECmd | `dfir/sqlecmd` | ✅ parse-verified (Maps/ baked in) |
-| **SrumECmd** | **`dfir/esedump` (Go substitute)** | ❌ SrumECmd cannot parse on Linux → `ese_dump` parses SRUDB.dat natively with IdMap/SID enrichment |
-| **SumECmd** | **`dfir/esedump` (Go substitute)** | ❌ SumECmd cannot parse on Linux → `ese_dump` reads SUM `Current.mdb` (any ESE database) |
+| AmcacheParser | `get-sybers/amcacheparser` (or all-in-one) | ✅ parse-verified on real evidence |
+| AppCompatCacheParser | `get-sybers/appcompatcacheparser` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
+| bstrings | `get-sybers/bstrings` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
+| EvtxECmd | `get-sybers/evtxecmd` | ✅ parse-verified (Maps/ baked in) |
+| iisGeolocate | `get-sybers/iisgeolocate` | ☑️ pure managed .NET — mount/refresh its GeoLite2 `.mmdb` databases if the release doesn't bundle current ones |
+| JLECmd | `get-sybers/jlecmd` | ✅ parse-verified |
+| LECmd | `get-sybers/lecmd` | ✅ parse-verified |
+| MFTECmd | `get-sybers/mftecmd` | ✅ parse-verified |
+| **PECmd** | **`get-sybers/prefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `prefetch_dump` parses XP→Win11 `.pf` natively, MAM-compressed included |
+| RBCmd | `get-sybers/rbcmd` | ✅ parse-verified |
+| RecentFileCacheParser | `get-sybers/recentfilecacheparser` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
+| RECmd | `get-sybers/recmd` | ✅ parse-verified (BatchExamples/ baked in) |
+| RLA | `get-sybers/rla` | ☑️ pure managed .NET (same Registry library whose LOG replay already works on Linux via AppCompatCacheParser/SBECmd) |
+| SBECmd | `get-sybers/sbecmd` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
+| SQLECmd | `get-sybers/sqlecmd` | ✅ parse-verified (Maps/ baked in) |
+| **SrumECmd** | **`get-sybers/esedump` (Go substitute)** | ❌ SrumECmd cannot parse on Linux → `ese_dump` parses SRUDB.dat natively with IdMap/SID enrichment |
+| **SumECmd** | **`get-sybers/esedump` (Go substitute)** | ❌ SumECmd cannot parse on Linux → `ese_dump` reads SUM `Current.mdb` (any ESE database) |
 | **VSCMount** | *(no container possible)* | ❌ manipulates the Windows VSS device namespace; on Linux use libvshadow (`vshadowinfo`/`vshadowmount`) on the host |
-| WxTCmd | `dfir/wxtcmd` / all-in-one launcher | ✅ parse-verified — needs a writable exec `/tmp` (see below) |
+| WxTCmd | `get-sybers/wxtcmd` / all-in-one launcher | ✅ parse-verified — needs a writable exec `/tmp` (see below) |
 
 ### Why three tools are substituted, not packaged
 
@@ -60,7 +60,7 @@ release), and this repo ships native substitutes instead:
 
 ## The Go substitutes (FROM scratch, a few MB, no runtime at all)
 
-### `dfir/prefetch` — prefetch_dump (replaces PECmd)
+### `get-sybers/prefetch` — prefetch_dump (replaces PECmd)
 
 Static Go binary on Velociraptor's `go-prefetch`, whose pure-Go
 LZXpress-Huffman implementation decompresses Win8+/Win10/Win11 MAM prefetch on
@@ -69,10 +69,10 @@ Win10 and Win11 `.pf` files — all four MAM-compressed samples included — par
 correctly on Linux.
 
 ```sh
-docker build -t dfir/prefetch:latest -f prefetch/Dockerfile prefetch
+docker build -t get-sybers/prefetch:latest -f prefetch/Dockerfile prefetch
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  dfir/prefetch:latest -d /input --json /output
+  get-sybers/prefetch:latest -d /input --json /output
 ```
 
 JSONL (or `--csv`) per file: `SourceFilename`, `Executable`, `Path`, `Hash`,
@@ -80,7 +80,7 @@ JSONL (or `--csv`) per file: `SourceFilename`, `Executable`, `Path`, `Hash`,
 `FilesAccessed`. Volume info blocks are the one PECmd output section not
 emitted (not exposed by the library).
 
-### `dfir/esedump` — ese_dump (replaces SrumECmd and SumECmd)
+### `get-sybers/esedump` — ese_dump (replaces SrumECmd and SumECmd)
 
 Static Go binary on Velociraptor's `go-ese` (pure-Go ESE). Verified in this
 repo against a real 7.8 MB `SRUDB.dat`: all provider tables dumped (16k+ rows
@@ -93,10 +93,10 @@ provider GUID tables get friendly output names (`ApplicationResourceUsage`,
 any ESE database — the same way (`--list` shows tables).
 
 ```sh
-docker build -t dfir/esedump:latest -f srum/Dockerfile srum
+docker build -t get-sybers/esedump:latest -f srum/Dockerfile srum
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  dfir/esedump:latest -f /input/SRUDB.dat --json /output
+  get-sybers/esedump:latest -f /input/SRUDB.dat --json /output
 ```
 
 Both images are `FROM scratch`: one static binary, no shell, no python, no
@@ -116,10 +116,10 @@ ships `rla.dll`), and the run-as uid/gid honour the `DFIR_UID`/`DFIR_GID`
 build args the DX_DFIR image role passes.
 
 ```sh
-docker build -t dfir/recmd:latest    --build-arg EZTOOL=RECmd    -f eztool/Dockerfile .
-docker build -t dfir/bstrings:latest --build-arg EZTOOL=bstrings -f eztool/Dockerfile .
+docker build -t get-sybers/recmd:latest    --build-arg EZTOOL=RECmd    -f eztool/Dockerfile .
+docker build -t get-sybers/bstrings:latest --build-arg EZTOOL=bstrings -f eztool/Dockerfile .
 # pin the release:
-docker build -t dfir/mftecmd:latest  --build-arg EZTOOL=MFTECmd \
+docker build -t get-sybers/mftecmd:latest  --build-arg EZTOOL=MFTECmd \
   --build-arg EZTOOL_SHA256=<sha256 of MFTECmd.zip> -f eztool/Dockerfile .
 # or everything at once:
 ./build-all.sh
@@ -139,12 +139,12 @@ argument picks the tool case-insensitively, the rest is passed through, and
 nothing else in the image is reachable via the entrypoint.
 
 ```sh
-docker build -t dfir/eztools:latest -f eztools-all/Dockerfile .
+docker build -t get-sybers/eztools:latest -f eztools-all/Dockerfile .
 
-docker run --rm dfir/eztools:latest list
+docker run --rm get-sybers/eztools:latest list
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only --tmpfs /tmp -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  dfir/eztools:latest EvtxECmd -d /input --csv /output
+  get-sybers/eztools:latest EvtxECmd -d /input --csv /output
 ```
 
 Why you'd want it over 15 per-tool images: one tag to pull, save and load for
@@ -189,7 +189,7 @@ The images are offline parsers — run them with nothing but mounts:
 ```sh
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only --tmpfs /tmp -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  dfir/recmd:latest -d /input --bn /opt/eztool/BatchExamples/Kroll_Batch.reb --csv /output
+  get-sybers/recmd:latest -d /input --bn /opt/eztool/BatchExamples/Kroll_Batch.reb --csv /output
 ```
 
 Two things dominate wall-clock time on real evidence:
@@ -230,7 +230,7 @@ what the DX_DFIR pipeline's image role does after every build.
 - **iisGeolocate**: keep its MaxMind `.mmdb` databases current — mount them
   read-only over the baked copies if the release's are stale.
 - **Prefetch on Windows hosts**: PECmd remains the reference parser *on
-  Windows*; `dfir/prefetch` exists because Linux pipelines otherwise had to
+  Windows*; `get-sybers/prefetch` exists because Linux pipelines otherwise had to
   fall back to Plaso for `.pf`.
 
 ## License

@@ -1,5 +1,5 @@
 ---
-# In-image hardening — executed BY ANSIBLE INSIDE each dfir/* image build
+# In-image hardening — executed BY ANSIBLE INSIDE each get-sybers/* image build
 # (`ansible-playbook -c local`), then squashed into a fresh final stage.
 #
 # BUILD-TIME hardener only: ansible strips the image here, then each Dockerfile

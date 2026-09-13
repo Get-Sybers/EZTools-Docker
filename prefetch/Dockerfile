@@ -15,10 +15,10 @@
 # hardening contract is met by construction — no shell, no python, no package
 # manager, no setuid, no libc even; runs as uid 2000.
 #
-#   docker build -t dfir/prefetch:latest -f prefetch/Dockerfile prefetch
+#   docker build -t get-sybers/prefetch:latest -f prefetch/Dockerfile prefetch
 #   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
 #     --network none --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-#     dfir/prefetch:latest -d /input --json /output
+#     get-sybers/prefetch:latest -d /input --json /output
 #
 # Output: JSONL (or --csv) — SourceFilename, Executable, Path, Hash, Version,
 # RunCount, LastRun, PreviousRuns, FilesAccessed. See prefetch/main.go for the
@@ -44,7 +44,7 @@ static_binary=true
 EOF
 USER 2000:2000
 ENTRYPOINT ["/prefetch_dump"]
-LABEL org.opencontainers.image.title="dfir/prefetch" \
+LABEL org.opencontainers.image.title="get-sybers/prefetch" \
       org.opencontainers.image.description="Linux-native Windows Prefetch parser (static Go, go-prefetch): parses XP through Win11 .pf including MAM/LZXpress-Huffman compressed files that PECmd refuses off-Windows. FROM scratch: no shell, no python, no libc, runs as uid 2000." \
       org.opencontainers.image.licenses="MIT" \
       com.get-sybers.eztool="prefetch_dump" \

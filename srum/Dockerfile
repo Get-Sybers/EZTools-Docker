@@ -49,7 +49,11 @@ COPY <<EOF /etc/dfir-hardened
 user=dfir uid=2000
 static_binary=true
 EOF
-USER 2000:2000
+# Single run-as uid/gid, passed by the DX_DFIR image role (dxdfir_runtime_uid/gid)
+# so this scratch image honours the same fixed non-root USER as the .NET images.
+ARG DFIR_UID=2000
+ARG DFIR_GID=2000
+USER ${DFIR_UID}:${DFIR_GID}
 ENTRYPOINT ["/ese_dump"]
 LABEL org.opencontainers.image.title="get-sybers/esedump" \
       org.opencontainers.image.description="Linux-native ESE database dumper (static Go, go-ese): parses SRUM (SRUDB.dat) with IdMap/SID enrichment and SUM (Current.mdb) databases that SrumECmd/SumECmd refuse off-Windows. FROM scratch: no shell, no python, no libc, runs as uid 2000." \

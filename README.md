@@ -19,7 +19,7 @@ artefacts natively.
 | iisGeolocate | `get-sybers/iisgeolocate` | ☑️ pure managed .NET — mount/refresh its GeoLite2 `.mmdb` databases if the release doesn't bundle current ones |
 | JLECmd | `get-sybers/jlecmd` | ✅ parse-verified |
 | LECmd | `get-sybers/lecmd` | ✅ parse-verified |
-| MFTECmd | `get-sybers/mftecmd` | ✅ parse-verified |
+| **MFTECmd** | **`get-sybers/gomft` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (go-ntfs) to drop the .NET runtime — real-$MFT verified |
 | **PECmd** | **`get-sybers/goprefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `goprefetch` parses XP→Win11 `.pf` natively, MAM-compressed included |
 | **RBCmd** | **`get-sybers/gorb` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary to drop the .NET runtime — parses v1/v2 `$I` records |
 | RecentFileCacheParser | `get-sybers/recentfilecacheparser` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
@@ -124,7 +124,27 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   get-sybers/gorb:latest -d /input --csv /output --csvf gorb.csv
 ```
 
-All three images are `FROM scratch`: one static binary, no shell, no python, no
+### `get-sybers/gomft` — gomft (replaces MFTECmd)
+
+Like RBCmd, MFTECmd parses on Linux under .NET; this substitute drops the .NET
+runtime with a static Go binary on Velociraptor's `go-ntfs`. It parses a raw
+`$MFT` and emits one record per entry — entry/sequence, parent reference, file
+name + extension, size, the `$STANDARD_INFORMATION` (0x10) and `$FILE_NAME`
+(0x30) MACB timestamps, flags and ADS — as JSONL or CSV, mirroring MFTECmd's
+columns. Fields go-ntfs does not expose (ReparseTarget, SecurityId, ObjectId,
+ZoneId) are omitted, never faked. `-d` finds the table by its `FILE` signature,
+so a raw-mount `$MFT` and Plaso's `image_export` rename (`_MFT`) both parse.
+Parse-verified on a real 128 MB `$MFT` (130k entries: the NTFS metadata files at
+entries 0–3, real system files resolved to their full paths and MACB times).
+
+```sh
+docker build -t get-sybers/gomft:latest -f gomft/Dockerfile gomft
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/gomft:latest -d /input --json /output --jsonf mftecmd.json
+```
+
+All four Go images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 
@@ -144,8 +164,8 @@ build args the DX_DFIR image role passes.
 docker build -t get-sybers/recmd:latest    --build-arg EZTOOL=RECmd    -f eztool/Dockerfile .
 docker build -t get-sybers/bstrings:latest --build-arg EZTOOL=bstrings -f eztool/Dockerfile .
 # pin the release:
-docker build -t get-sybers/mftecmd:latest  --build-arg EZTOOL=MFTECmd \
-  --build-arg EZTOOL_SHA256=<sha256 of MFTECmd.zip> -f eztool/Dockerfile .
+docker build -t get-sybers/sqlecmd:latest  --build-arg EZTOOL=SQLECmd \
+  --build-arg EZTOOL_SHA256=<sha256 of SQLECmd.zip> -f eztool/Dockerfile .
 # or everything at once:
 ./build-all.sh
 ```

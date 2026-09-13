@@ -46,7 +46,9 @@ func TestLooksLikeMFTByHeader(t *testing.T) {
 		t.Error("non-$MFT file wrongly detected")
 	}
 	tiny := filepath.Join(dir, "x")
-	os.WriteFile(tiny, []byte("FI"), 0o644)
+	if err := os.WriteFile(tiny, []byte("FI"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if looksLikeMFT(tiny) {
 		t.Error("too-short file wrongly detected")
 	}

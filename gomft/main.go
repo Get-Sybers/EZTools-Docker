@@ -314,9 +314,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gomft: no $MFT found under %s\n", *dir)
 		os.Exit(1)
 	}
+	if !*quiet {
+		fmt.Fprintf(os.Stderr, "gomft: %d entries across %d $MFT file(s)\n", entries, parsed)
+	}
 	if failed > 0 {
 		fmt.Fprintf(os.Stderr, "gomft: %d file(s) failed to parse\n", failed)
 		os.Exit(2)
 	}
-	_ = entries
 }

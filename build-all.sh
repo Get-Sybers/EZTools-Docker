@@ -81,6 +81,7 @@ resolve() {
     fi
   done
   echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft all-in-one" >&2
+  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd)" >&2
   exit 1
 }
 

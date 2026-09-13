@@ -120,16 +120,32 @@ func TestParseRejectsUnknownVersionAndTruncation(t *testing.T) {
 	}
 }
 
-func TestCollectInputsMatchesDollarI(t *testing.T) {
+func TestDirScanDetectsRecordsByHeaderNotName(t *testing.T) {
 	dir := t.TempDir()
-	for _, n := range []string{"$IABC.txt", "$I999", "$RABC.txt", "notes.txt"} {
-		mustWrite(t, filepath.Join(dir, n), []byte("x"))
-	}
-	got, err := collectInputs("", dir)
+	when := time.Date(2025, 3, 18, 5, 40, 22, 0, time.UTC)
+	// a raw-mount $I name, a Plaso-renamed $ -> _ name, and non-$I files that
+	// share the tree (desktop.ini, a $R payload, an unrelated file)
+	mustWrite(t, filepath.Join(dir, "$IRAWNAME.docx"), makeV2(10, when, `C:\a.docx`))
+	mustWrite(t, filepath.Join(dir, "_IPLASO.lnk"), makeV1(20, when, `C:\b.lnk`)) // plaso rename
+	mustWrite(t, filepath.Join(dir, "desktop.ini"), []byte("[.ShellClassInfo]\n"))
+	mustWrite(t, filepath.Join(dir, "$RPAYLOAD.docx"), []byte("real file contents, not a header"))
+	mustWrite(t, filepath.Join(dir, "notes.txt"), []byte("nope"))
+
+	files, err := collectInputs("", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 { // only the two $I* files, never $R payloads or unrelated files
-		t.Errorf("collectInputs found %d files, want 2: %v", len(got), got)
+	// collectInputs returns every file; the header check picks the two records
+	var detected []string
+	for _, p := range files {
+		if peekLooksLikeRecord(p) {
+			if _, err := parseOne(p); err != nil {
+				t.Errorf("header-detected %s but parse failed: %v", p, err)
+			}
+			detected = append(detected, filepath.Base(p))
+		}
+	}
+	if len(detected) != 2 {
+		t.Errorf("detected %d $I records, want 2 ($IRAWNAME.docx + _IPLASO.lnk): %v", len(detected), detected)
 	}
 }

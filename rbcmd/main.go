@@ -37,7 +37,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf16"
 )
@@ -79,6 +78,39 @@ func parseOne(path string) (*record, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseBytes(path, data)
+}
+
+// looksLikeRecord is a cheap header check: a $I record opens with a version
+// dword of 1 or 2. The -d scan uses it to pick $I metadata records out of a
+// tree by CONTENT, not filename — the pipeline feeds files that Plaso's
+// image_export has renamed ($ -> _, so "$IXXXX" arrives as "_IXXXX"), and a
+// raw mount keeps "$IXXXX"; matching on the header finds both (and skips
+// desktop.ini, the $R payloads, and everything else) regardless of name.
+func looksLikeRecord(data []byte) bool {
+	if len(data) < 24 {
+		return false
+	}
+	v := int64(binary.LittleEndian.Uint64(data[0:8]))
+	return v == 1 || v == 2
+}
+
+// peekLooksLikeRecord reads just the 24-byte header so a large unrelated file in
+// the scanned tree is not slurped whole just to reject it.
+func peekLooksLikeRecord(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var hdr [24]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		return false
+	}
+	return looksLikeRecord(hdr[:])
+}
+
+func parseBytes(path string, data []byte) (*record, error) {
 	if len(data) < 24 {
 		return nil, fmt.Errorf("too small (%d bytes) to be a $I record", len(data))
 	}
@@ -117,9 +149,10 @@ func parseOne(path string) (*record, error) {
 	}, nil
 }
 
-// collectInputs returns the $I files to parse: a single -f file, or every file
-// under -d whose basename starts with "$I" (the modern Recycle Bin metadata
-// naming, e.g. $IXXXXXX.ext). Unreadable subtrees under -d are skipped with a
+// collectInputs returns the candidate files: a single -f file, or every regular
+// file under -d. The -d set is NOT filtered by name here — the caller picks the
+// real $I records out by header (looksLikeRecord), because the pipeline feeds
+// Plaso-renamed files ($ -> _). Unreadable subtrees under -d are skipped with a
 // note; an unreadable root is fatal.
 func collectInputs(file, dir string) ([]string, error) {
 	if file != "" {
@@ -137,7 +170,7 @@ func collectInputs(file, dir string) ([]string, error) {
 			}
 			return nil
 		}
-		if !d.IsDir() && strings.HasPrefix(filepath.Base(p), "$I") {
+		if !d.IsDir() {
 			out = append(out, p)
 		}
 		return nil
@@ -177,13 +210,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	dirMode := *dir != ""
 	inputs, err := collectInputs(*file, *dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rbcmd: %v\n", err)
 		os.Exit(1)
 	}
 	if len(inputs) == 0 {
-		fmt.Fprintln(os.Stderr, "rbcmd: no $I files found")
+		fmt.Fprintln(os.Stderr, "rbcmd: no files found")
 		os.Exit(1)
 	}
 
@@ -214,13 +248,22 @@ func main() {
 
 	enc := json.NewEncoder(w)
 	failed := 0
+	emitted := 0
 	for _, p := range inputs {
+		// Directory scan: pick $I records out by header, silently skipping the
+		// other files in the tree (desktop.ini, $R payloads, unrelated files) —
+		// so a plaso-renamed "_IXXXX" or a raw-mount "$IXXXX" both parse and a
+		// mis-parse of a non-$I file is never reported. -f always parses.
+		if dirMode && !peekLooksLikeRecord(p) {
+			continue
+		}
 		rec, err := parseOne(p)
 		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "rbcmd: FAILED %s: %v\n", p, err)
 			continue
 		}
+		emitted++
 		if cw != nil {
 			if err := cw.Write([]string{rec.SourceName, rec.FileType, rec.FileName,
 				strconv.FormatInt(rec.FileSize, 10), rec.DeletedOn}); err != nil {
@@ -242,8 +285,14 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// A directory scan that matched no $I records is worth flagging (an empty
+	// Recycle Bin, or a wrong -d) but is not an error on its own.
+	if dirMode && emitted == 0 && failed == 0 {
+		fmt.Fprintf(os.Stderr, "rbcmd: no $I records found under %s\n", *dir)
+		os.Exit(1)
+	}
 	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "rbcmd: %d of %d files failed\n", failed, len(inputs))
+		fmt.Fprintf(os.Stderr, "rbcmd: %d $I record(s) failed to parse\n", failed)
 		os.Exit(2)
 	}
 }

@@ -42,7 +42,11 @@ COPY <<EOF /etc/dfir-hardened
 user=dfir uid=2000
 static_binary=true
 EOF
-USER 2000:2000
+# Single run-as uid/gid, passed by the DX_DFIR image role (dxdfir_runtime_uid/gid)
+# so this scratch image honours the same fixed non-root USER as the .NET images.
+ARG DFIR_UID=2000
+ARG DFIR_GID=2000
+USER ${DFIR_UID}:${DFIR_GID}
 ENTRYPOINT ["/prefetch_dump"]
 LABEL org.opencontainers.image.title="get-sybers/prefetch" \
       org.opencontainers.image.description="Linux-native Windows Prefetch parser (static Go, go-prefetch): parses XP through Win11 .pf including MAM/LZXpress-Huffman compressed files that PECmd refuses off-Windows. FROM scratch: no shell, no python, no libc, runs as uid 2000." \

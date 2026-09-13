@@ -42,13 +42,18 @@ RUN set -eux; \
 
 # ---- minimal hardened EvtxECmd image ----------------------------------------
 FROM mcr.microsoft.com/dotnet/runtime:${DOTNET_VERSION} AS hardened
+# Single run-as uid/gid, passed by the DX_DFIR image role (dxdfir_runtime_uid/gid)
+# so the account the hardener renames matches the final USER below.
+ARG DFIR_UID=2000
+ARG DFIR_GID=2000
 COPY --from=fetch /opt/evtxecmd /opt/evtxecmd
 RUN dotnet /opt/evtxecmd/EvtxECmd.dll --help > /dev/null
 COPY hardening/harden.yml /tmp/hardening/harden.yml
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ansible-core; \
-    ansible-playbook -c local -i localhost, /tmp/hardening/harden.yml; \
+    ansible-playbook -c local -i localhost, /tmp/hardening/harden.yml \
+        -e "harden_uid=${DFIR_UID}" -e "harden_gid=${DFIR_GID}"; \
     rm -rf /usr/bin/ansible* /usr/lib/python3/dist-packages/ansible* \
            /etc/ansible /root/.ansible /tmp/hardening \
            /usr/bin/python3* /usr/lib/python3* \
@@ -62,10 +67,12 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     DOTNET_RUNNING_IN_CONTAINER=true DOTNET_EnableDiagnostics=0 \
     DOTNET_NOLOGO=1
 WORKDIR /opt/evtxecmd
-USER 2000:2000
+ARG DFIR_UID=2000
+ARG DFIR_GID=2000
+USER ${DFIR_UID}:${DFIR_GID}
 ENTRYPOINT ["dotnet", "/opt/evtxecmd/EvtxECmd.dll"]
 LABEL org.opencontainers.image.title="get-sybers/evtxecmd" \
-      org.opencontainers.image.description="Minimal hardened EvtxECmd (.NET) for the DX_DFIR dxdfir_evtx role: uid0 renamed+locked, no ansible/apt/pip/sudo/setuid, no shell, no python, runs as uid 2000." \
+      org.opencontainers.image.description="Minimal hardened EvtxECmd (.NET) for the DX_DFIR dxdfir_evtx role: uid0 renamed+locked, no ansible/apt/pip/sudo/setuid, no shell, no python, runs as a fixed non-root uid (default 2000)." \
       org.opencontainers.image.source="https://github.com/EricZimmerman/evtx" \
       org.opencontainers.image.licenses="MIT" \
       com.get-sybers.evtxecmd.url="${EVTXECMD_URL}" \

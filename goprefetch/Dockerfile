@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# prefetch_dump — Linux-native Windows Prefetch parser (PECmd's Linux
+# goprefetch — Linux-native Windows Prefetch parser (PECmd's Linux
 # substitute) for the DX_DFIR pipeline.
 #
 # PECmd is Windows-host-only (verified empirically, source and runtime: its
@@ -15,10 +15,10 @@
 # hardening contract is met by construction — no shell, no python, no package
 # manager, no setuid, no libc even; runs as uid 2000.
 #
-#   docker build -t get-sybers/prefetch:latest -f prefetch/Dockerfile prefetch
+#   docker build -t get-sybers/goprefetch:latest -f goprefetch/Dockerfile goprefetch
 #   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
 #     --network none --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-#     get-sybers/prefetch:latest -d /input --json /output
+#     get-sybers/goprefetch:latest -d /input --json /output
 #
 # Output: JSONL (or --csv) — SourceFilename, Executable, Path, Hash, Version,
 # RunCount, LastRun, PreviousRuns, FilesAccessed. See prefetch/main.go for the
@@ -33,11 +33,11 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY main.go .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /prefetch_dump . \
-    && /prefetch_dump -f /dev/null 2>/dev/null || true
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goprefetch . \
+    && /goprefetch -f /dev/null 2>/dev/null || true
 
 FROM scratch
-COPY --from=build /prefetch_dump /prefetch_dump
+COPY --from=build /goprefetch /goprefetch
 COPY <<EOF /etc/dfir-hardened
 user=dfir uid=2000
 static_binary=true
@@ -47,10 +47,10 @@ EOF
 ARG DFIR_UID=2000
 ARG DFIR_GID=2000
 USER ${DFIR_UID}:${DFIR_GID}
-ENTRYPOINT ["/prefetch_dump"]
-LABEL org.opencontainers.image.title="get-sybers/prefetch" \
+ENTRYPOINT ["/goprefetch"]
+LABEL org.opencontainers.image.title="get-sybers/goprefetch" \
       org.opencontainers.image.description="Linux-native Windows Prefetch parser (static Go, go-prefetch): parses XP through Win11 .pf including MAM/LZXpress-Huffman compressed files that PECmd refuses off-Windows. FROM scratch: no shell, no python, no libc, runs as uid 2000." \
       org.opencontainers.image.licenses="MIT" \
-      com.get-sybers.eztool="prefetch_dump" \
+      com.get-sybers.eztool="goprefetch" \
       com.get-sybers.eztool.substitute-for="PECmd" \
       com.get-sybers.hardened="true"

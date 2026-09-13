@@ -1,4 +1,4 @@
-module github.com/Get-Sybers/EZTools-Docker/srum
+module github.com/Get-Sybers/GoDFIR-toolz/goese
 
 go 1.24
 

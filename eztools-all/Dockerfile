@@ -9,14 +9,14 @@
 # passed through, and nothing else in the image is reachable via the
 # entrypoint.
 #
-#   docker build -t dfir/eztools:latest -f eztools-all/Dockerfile .
+#   docker build -t get-sybers/eztools:latest -f eztools-all/Dockerfile .
 #
 #   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
 #     --network none --read-only --tmpfs /tmp \
 #     -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-#     dfir/eztools:latest EvtxECmd -f /input/Security.evtx --csv /output
+#     get-sybers/eztools:latest EvtxECmd -f /input/Security.evtx --csv /output
 #
-#   docker run --rm dfir/eztools:latest list
+#   docker run --rm get-sybers/eztools:latest list
 #
 # WxTCmd needs a writable, exec-capable /tmp (its SQLite interop unpacks a
 # native library beside the DLL; the launcher copies the tool there first):
@@ -126,7 +126,7 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 WORKDIR /opt/eztools
 USER ${DFIR_UID}:${DFIR_GID}
 ENTRYPOINT ["/usr/local/bin/eztool"]
-LABEL org.opencontainers.image.title="dfir/eztools" \
+LABEL org.opencontainers.image.title="get-sybers/eztools" \
       org.opencontainers.image.description="All-in-one minimal hardened Eric Zimmerman tool image (.NET) for the DX_DFIR pipeline: every Linux-viable EZ CLI tool behind a static Go launcher (first arg selects the tool). uid0 renamed+locked, no ansible/apt/pip/sudo/setuid, no shell, no python, runs as uid 2000." \
       org.opencontainers.image.licenses="MIT" \
       com.get-sybers.eztool="all" \

@@ -16,18 +16,18 @@
 # hardening contract is met by construction — no shell, no python, no package
 # manager, no setuid, no libc even; runs as uid 2000.
 #
-#   docker build -t dfir/esedump:latest -f srum/Dockerfile srum
+#   docker build -t get-sybers/esedump:latest -f srum/Dockerfile srum
 #
 # Mode 2 — one extracted database:
 #   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
 #     --network none --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-#     dfir/esedump:latest -f /input/SRUDB.dat --json /output
+#     get-sybers/esedump:latest -f /input/SRUDB.dat --json /output
 #
 # Mode 1 — a mounted disk image root (finds every SRUM/SUM database, dumps
 # each into its own sub-directory, rows carry SourceDb):
 #   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
 #     --network none --read-only -v /mnt/image:/image:ro -v "$PWD/out:/output" \
-#     dfir/esedump:latest -d /image --json /output
+#     get-sybers/esedump:latest -d /image --json /output
 #
 # Output: one JSONL (or --csv) file per table; well-known SRUM provider GUID
 # tables get friendly file names (ApplicationResourceUsage, NetworkDataUsage,
@@ -51,7 +51,7 @@ static_binary=true
 EOF
 USER 2000:2000
 ENTRYPOINT ["/ese_dump"]
-LABEL org.opencontainers.image.title="dfir/esedump" \
+LABEL org.opencontainers.image.title="get-sybers/esedump" \
       org.opencontainers.image.description="Linux-native ESE database dumper (static Go, go-ese): parses SRUM (SRUDB.dat) with IdMap/SID enrichment and SUM (Current.mdb) databases that SrumECmd/SumECmd refuse off-Windows. FROM scratch: no shell, no python, no libc, runs as uid 2000." \
       org.opencontainers.image.licenses="MIT" \
       com.get-sybers.eztool="ese_dump" \

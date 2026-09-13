@@ -7,12 +7,12 @@
 # removed from the final image; the tool is the pinned ENTRYPOINT
 # (dotnet /opt/evtxecmd/EvtxECmd.dll).
 #
-#   docker build -t dfir/evtxecmd:latest -f docker/evtxecmd/Dockerfile docker
+#   docker build -t get-sybers/evtxecmd:latest -f docker/evtxecmd/Dockerfile docker
 # Pin the release (recommended):
-#   docker build -t dfir/evtxecmd:latest \
+#   docker build -t get-sybers/evtxecmd:latest \
 #     --build-arg EVTXECMD_SHA256=<sha256 of EvtxECmd.zip> -f docker/evtxecmd/Dockerfile docker
 # Run (the caller supplies only the flags — the DLL is the entrypoint):
-#   docker run --rm -v "$PWD/in:/input:ro" -v "$PWD/out:/output" dfir/evtxecmd:latest \
+#   docker run --rm -v "$PWD/in:/input:ro" -v "$PWD/out:/output" get-sybers/evtxecmd:latest \
 #     -f /input/Security.evtx --json /output --jsonf Security_EvtxECmd_Output.json
 
 ARG DOTNET_VERSION=9.0
@@ -64,8 +64,8 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 WORKDIR /opt/evtxecmd
 USER 2000:2000
 ENTRYPOINT ["dotnet", "/opt/evtxecmd/EvtxECmd.dll"]
-LABEL org.opencontainers.image.title="dfir/evtxecmd" \
-      org.opencontainers.image.description="Minimal hardened EvtxECmd (.NET) for the DX_DFIR dfir_evtx role: uid0 renamed+locked, no ansible/apt/pip/sudo/setuid, no shell, no python, runs as uid 2000." \
+LABEL org.opencontainers.image.title="get-sybers/evtxecmd" \
+      org.opencontainers.image.description="Minimal hardened EvtxECmd (.NET) for the DX_DFIR dxdfir_evtx role: uid0 renamed+locked, no ansible/apt/pip/sudo/setuid, no shell, no python, runs as uid 2000." \
       org.opencontainers.image.source="https://github.com/EricZimmerman/evtx" \
       org.opencontainers.image.licenses="MIT" \
       com.get-sybers.evtxecmd.url="${EVTXECMD_URL}" \

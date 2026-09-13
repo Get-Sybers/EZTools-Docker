@@ -6,7 +6,7 @@
 #
 #   ./build-all.sh                 # every per-tool image + prefetch + esedump
 #   ./build-all.sh recmd mftecmd   # a subset (names case-insensitive)
-#   ./build-all.sh all-in-one      # the single dfir/eztools image
+#   ./build-all.sh all-in-one      # the single get-sybers/eztools image
 #   ./build-all.sh prefetch esedump
 #
 # PECmd, SrumECmd, SumECmd and VSCMount are not in the list on purpose: they
@@ -26,24 +26,24 @@ lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 build_eztool() {
   local tool="$1"
-  echo "==> dfir/$(lc "${tool}") (eztool/Dockerfile, EZTOOL=${tool})"
-  docker build -t "dfir/$(lc "${tool}"):latest" \
+  echo "==> get-sybers/$(lc "${tool}") (eztool/Dockerfile, EZTOOL=${tool})"
+  docker build -t "get-sybers/$(lc "${tool}"):latest" \
     --build-arg EZTOOL="${tool}" -f eztool/Dockerfile .
 }
 
 build_prefetch() {
-  echo "==> dfir/prefetch (Go, PECmd substitute)"
-  docker build -t dfir/prefetch:latest -f prefetch/Dockerfile prefetch
+  echo "==> get-sybers/prefetch (Go, PECmd substitute)"
+  docker build -t get-sybers/prefetch:latest -f prefetch/Dockerfile prefetch
 }
 
 build_esedump() {
-  echo "==> dfir/esedump (Go, SrumECmd/SumECmd substitute)"
-  docker build -t dfir/esedump:latest -f srum/Dockerfile srum
+  echo "==> get-sybers/esedump (Go, SrumECmd/SumECmd substitute)"
+  docker build -t get-sybers/esedump:latest -f srum/Dockerfile srum
 }
 
 build_all_in_one() {
-  echo "==> dfir/eztools (all-in-one, eztools-all/Dockerfile)"
-  docker build -t dfir/eztools:latest -f eztools-all/Dockerfile .
+  echo "==> get-sybers/eztools (all-in-one, eztools-all/Dockerfile)"
+  docker build -t get-sybers/eztools:latest -f eztools-all/Dockerfile .
 }
 
 resolve() {

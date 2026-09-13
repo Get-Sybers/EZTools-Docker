@@ -21,7 +21,7 @@ artefacts natively.
 | LECmd | `get-sybers/lecmd` | ✅ parse-verified |
 | MFTECmd | `get-sybers/mftecmd` | ✅ parse-verified |
 | **PECmd** | **`get-sybers/prefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `prefetch_dump` parses XP→Win11 `.pf` natively, MAM-compressed included |
-| RBCmd | `get-sybers/rbcmd` | ✅ parse-verified |
+| **RBCmd** | **`get-sybers/rbcmd` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary to drop the .NET runtime — parses v1/v2 `$I` records |
 | RecentFileCacheParser | `get-sybers/recentfilecacheparser` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
 | RECmd | `get-sybers/recmd` | ✅ parse-verified (BatchExamples/ baked in) |
 | RLA | `get-sybers/rla` | ☑️ pure managed .NET (same Registry library whose LOG replay already works on Linux via AppCompatCacheParser/SBECmd) |
@@ -99,7 +99,25 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   get-sybers/esedump:latest -f /input/SRUDB.dat --json /output
 ```
 
-Both images are `FROM scratch`: one static binary, no shell, no python, no
+### `get-sybers/rbcmd` — rbcmd (replaces RBCmd)
+
+Unlike the three above, RBCmd *does* parse on Linux under .NET — this substitute
+exists to drop the .NET runtime, not to work around a Windows-only guard (the
+`$I` metadata format is simple and fully specified, so a static Go binary is a
+clean win; DX_DFIR #188 initiative 2). It parses the modern Recycle Bin `$I`
+records — v1 (Vista–8.0, fixed 260-wchar path) and v2 (Win8.1/10/11,
+length-prefixed path) — and emits RBCmd's columns (`SourceName`, `FileType`,
+`FileName`, `FileSize`, `DeletedOn`) as CSV or JSONL. The legacy XP `INFO2`
+container is not handled (obsolete, not in the pipeline's extraction filter).
+
+```sh
+docker build -t get-sybers/rbcmd:latest -f rbcmd/Dockerfile rbcmd
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/rbcmd:latest -d /input --csv /output --csvf rbcmd.csv
+```
+
+All three images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 

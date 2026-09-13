@@ -12,9 +12,11 @@
 #   - sudo/su/pkexec and the account-manipulation setuid suite are REMOVED,
 #     and every remaining setuid/setgid bit is stripped
 #   - package managers and pip are removed (nothing installable at runtime)
-#   - the tool runs as the fixed unprivileged user (USER 2000:2000)
+#   - the tool runs as the fixed unprivileged user
+#     (USER harden_uid:harden_gid, default 2000:2000)
 #
-# Contract verified after every build by the dfir_images role (static image
+# Contract verified after every build by the consuming pipeline's image role
+# (DX_DFIR's dxdfir_images) (static image
 # config + a `docker export` scan proving the removed binaries are absent).
 #
 # Vars (passed with -e from each Dockerfile):
@@ -161,6 +163,6 @@
         dest: /etc/dfir-hardened
         mode: "0444"
         content: |
-          user={{ harden_user }} uid={{ harden_uid }}
+          user={{ harden_user }} uid={{ harden_uid }} gid={{ harden_gid }}
           root_renamed=ansible
           pkg_mgr_removed={{ harden_remove_pkg_mgr | bool }}

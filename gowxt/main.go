@@ -77,16 +77,27 @@ func (r *record) csvRow() []string {
 	}
 }
 
-// unixTS renders an ActivitiesCache Unix-epoch-seconds value as RFC3339 UTC, or
-// "" when zero/absent. A plausibly-FILETIME value (100-ns since 1601, ~1.1e17
-// for a modern date) is converted too, so a mixed source is not mis-dated.
-func unixTS(v interface{}) string {
+// toEpochSeconds returns the value as Unix epoch seconds, converting a plausibly-
+// FILETIME value (100-ns since 1601, ~1.1e17 for a modern date) so both
+// epoch-seconds and FILETIME rows are handled consistently everywhere (timestamps
+// AND durations). ok=false for a zero/absent value.
+func toEpochSeconds(v interface{}) (int64, bool) {
 	n, ok := asInt(v)
 	if !ok || n == 0 {
-		return ""
+		return 0, false
 	}
-	if n > 100_000_000_000_000 { // looks like a FILETIME, not Unix seconds
-		return time.Unix(n/10_000_000-11644473600, 0).UTC().Format(time.RFC3339)
+	if n > 100_000_000_000_000 { // FILETIME, not Unix seconds
+		return n/10_000_000 - 11644473600, true
+	}
+	return n, true
+}
+
+// unixTS renders an ActivitiesCache timestamp as RFC3339 UTC, or "" when
+// zero/absent.
+func unixTS(v interface{}) string {
+	n, ok := toEpochSeconds(v)
+	if !ok {
+		return ""
 	}
 	return time.Unix(n, 0).UTC().Format(time.RFC3339)
 }
@@ -181,13 +192,13 @@ func firstStr(m map[string]interface{}, keys ...string) string {
 }
 
 func durationOf(start, end interface{}) string {
-	s, ok1 := asInt(start)
-	e, ok2 := asInt(end)
-	if !ok1 || !ok2 || s == 0 || e == 0 || e < s {
+	// derive from the CONVERTED instants so a FILETIME-stored DB isn't off by ~1e7
+	s, ok1 := toEpochSeconds(start)
+	e, ok2 := toEpochSeconds(end)
+	if !ok1 || !ok2 || e < s {
 		return ""
 	}
-	d := time.Duration(e-s) * time.Second
-	total := int64(d.Seconds())
+	total := e - s
 	return fmt.Sprintf("%02d:%02d:%02d", total/3600, (total%3600)/60, total%60)
 }
 
@@ -332,6 +343,23 @@ func looksLikeSQLite(path string) bool {
 	return string(hdr[:]) == sqliteMagic
 }
 
+// hasActivityTable reports whether the SQLite DB at path is an ActivitiesCache.db
+// (carries an "Activity" table). A -d scan uses it to positively identify Timeline
+// DBs and skip unrelated SQLite databases silently. Opens read-only+immutable so
+// it neither copies the file nor needs a work dir.
+func hasActivityTable(path string) bool {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&immutable=1")
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	var name string
+	err = db.QueryRow(
+		"SELECT name FROM sqlite_master WHERE type='table' AND name='Activity' LIMIT 1",
+	).Scan(&name)
+	return err == nil && name == "Activity"
+}
+
 func collectInputs(file, dir string) ([]string, error) {
 	if file != "" {
 		return []string{file}, nil
@@ -435,8 +463,13 @@ func main() {
 
 	failed, parsed, activities := 0, 0, 0
 	for _, p := range inputs {
-		if dirMode && !looksLikeSQLite(p) {
-			continue // -d: pick the SQLite DB(s) out of the tree by header
+		if dirMode {
+			if !looksLikeSQLite(p) {
+				continue // -d: skip non-SQLite files by header
+			}
+			if !hasActivityTable(p) {
+				continue // -d: skip SQLite DBs that aren't ActivitiesCache, silently
+			}
 		}
 		n, err := parseDB(p, *workDir, emit)
 		if err != nil {

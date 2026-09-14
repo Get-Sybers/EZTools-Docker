@@ -22,7 +22,7 @@
 # The final image is FROM scratch: one static binary, nothing else — no shell,
 # no python, no package manager, no setuid, no libc; runs as uid 2000.
 
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.24
 
 FROM golang:${GO_VERSION}-alpine AS build
 WORKDIR /src

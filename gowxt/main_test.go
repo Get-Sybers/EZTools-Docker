@@ -56,6 +56,54 @@ func TestDurationOf(t *testing.T) {
 	if got := durationOf(int64(0), int64(280)); got != "" {
 		t.Errorf("zero start = %q", got)
 	}
+	if got := durationOf(int64(280), int64(100)); got != "" {
+		t.Errorf("end<start = %q", got)
+	}
+	// FILETIME start/end 3 min apart must yield the same duration as epoch-seconds
+	// (both are converted first, so a FILETIME-stored DB isn't off by ~1e7).
+	base := time.Date(2024, 1, 19, 5, 34, 13, 0, time.UTC).Unix() + 11644473600
+	ftStart := base * 10_000_000
+	ftEnd := (base + 180) * 10_000_000
+	if got := durationOf(ftStart, ftEnd); got != "00:03:00" {
+		t.Errorf("filetime duration = %q, want 00:03:00", got)
+	}
+}
+
+func TestHasActivityTable(t *testing.T) {
+	dir := t.TempDir()
+
+	// a real ActivitiesCache.db (carries an Activity table) → true
+	act := filepath.Join(dir, "ActivitiesCache.db")
+	db, err := sql.Open("sqlite", "file:"+act)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE Activity(Id BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if !hasActivityTable(act) {
+		t.Error("ActivitiesCache.db not recognised")
+	}
+
+	// an unrelated SQLite DB (no Activity table) → false, so -d skips it silently
+	other := filepath.Join(dir, "History")
+	db2, err := sql.Open("sqlite", "file:"+other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db2.Exec(`CREATE TABLE downloads(id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	db2.Close()
+	if hasActivityTable(other) {
+		t.Error("non-Activities SQLite DB wrongly matched")
+	}
+
+	// a non-existent / non-SQLite path → false, never a panic
+	if hasActivityTable(filepath.Join(dir, "nope.db")) {
+		t.Error("missing path wrongly matched")
+	}
 }
 
 func TestLooksLikeSQLite(t *testing.T) {

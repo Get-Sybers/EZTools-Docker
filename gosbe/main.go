@@ -322,12 +322,20 @@ var bagRoots = []string{
 	`Local Settings\Software\Microsoft\Windows\ShellNoRoam\BagMRU`,
 }
 
-func runHive(hivePath, workDir string, replay bool, e *emitter) (int, error) {
-	reg, cleanup, _, err := openHive(hivePath, workDir, replay)
+func runHive(hivePath, workDir string, replay, quiet bool, e *emitter) (int, error) {
+	reg, cleanup, note, replayFailed, err := openHive(hivePath, workDir, replay)
 	if err != nil {
 		return 0, err
 	}
 	defer cleanup()
+	// A dirty-hive replay that fell back to the committed state is a fidelity
+	// warning (recent shellbag transactions may be missing), so surface it even
+	// under -q; a successful recovery is routine progress, shown only when not quiet.
+	if replayFailed {
+		fmt.Fprintf(os.Stderr, "gosbe: WARNING %s: %s\n", hivePath, note)
+	} else if !quiet && note != "" && note != "committed" {
+		fmt.Fprintf(os.Stderr, "gosbe: %s: %s\n", hivePath, note)
+	}
 	n := 0
 	for _, root := range bagRoots {
 		node := reg.OpenKey(root)
@@ -427,10 +435,12 @@ func openOut(dir, name, defName string) (io.WriteCloser, error) {
 
 // openHive: replay .LOG1/.LOG2 into a recovered copy under workDir when replay
 // is set and they exist, else parse the committed hive. Graceful fallback.
-func openHive(p, workDir string, replay bool) (*regparser.Registry, func(), string, error) {
+// The returned bool is set when a dirty-hive .LOG replay was attempted but
+// failed and parsing fell back to the committed state (a fidelity warning).
+func openHive(p, workDir string, replay bool) (*regparser.Registry, func(), string, bool, error) {
 	hf, err := os.Open(p)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", false, err
 	}
 	var logs []*os.File
 	if replay {
@@ -454,23 +464,23 @@ func openHive(p, workDir string, replay bool) (*regparser.Registry, func(), stri
 			if nerr != nil {
 				recovered.Close()
 				os.Remove(recovered.Name())
-				return nil, nil, "", nerr
+				return nil, nil, "", false, nerr
 			}
-			return reg, func() { recovered.Close(); os.Remove(recovered.Name()) }, "recovered via .LOG replay", nil
+			return reg, func() { recovered.Close(); os.Remove(recovered.Name()) }, "recovered via .LOG replay", false, nil
 		}
 		reg, nerr := regparser.NewRegistry(hf)
 		if nerr != nil {
 			hf.Close()
-			return nil, nil, "", nerr
+			return nil, nil, "", false, nerr
 		}
-		return reg, func() { hf.Close() }, fmt.Sprintf("committed (.LOG replay failed: %v)", rerr), nil
+		return reg, func() { hf.Close() }, fmt.Sprintf("committed (.LOG replay failed: %v)", rerr), true, nil
 	}
 	reg, nerr := regparser.NewRegistry(hf)
 	if nerr != nil {
 		hf.Close()
-		return nil, nil, "", nerr
+		return nil, nil, "", false, nerr
 	}
-	return reg, func() { hf.Close() }, "committed", nil
+	return reg, func() { hf.Close() }, "committed", false, nil
 }
 
 func main() {
@@ -521,7 +531,7 @@ func main() {
 		if dirMode && (isLogFile(p) || !looksLikeHive(p)) {
 			continue
 		}
-		n, err := runHive(p, *workDir, replay, e)
+		n, err := runHive(p, *workDir, replay, *quiet, e)
 		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "gosbe: FAILED %s: %v\n", p, err)

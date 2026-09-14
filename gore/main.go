@@ -110,17 +110,28 @@ func hiveTypeOf(path string) string {
 
 // valueDataString renders a value the way the recmd_batch map expects to read
 // it: strings/multi-sz/ints as text, binary as hex (never a Go artefact).
+// The integer branch is keyed off the value *type*, not off Uint64 being
+// non-zero, so a genuine DWORD/QWORD of 0 renders as "0" rather than falling
+// through to the raw-byte (hex/empty) branch.
 func valueDataString(vd *regparser.ValueData) string {
 	if vd == nil {
 		return ""
 	}
+	switch vd.Type {
+	case regparser.REG_DWORD, regparser.REG_DWORD_BIG_ENDIAN, regparser.REG_QWORD:
+		return strconv.FormatUint(vd.Uint64, 10)
+	case regparser.REG_SZ, regparser.REG_EXPAND_SZ:
+		return vd.String
+	case regparser.REG_MULTI_SZ:
+		return strings.Join(vd.MultiSz, " ")
+	}
+	// REG_BINARY / REG_NONE / unknown: prefer a decoded string if the parser
+	// filled one, else the raw bytes as hex — never a Go artefact.
 	switch {
 	case vd.String != "":
 		return vd.String
 	case len(vd.MultiSz) > 0:
 		return strings.Join(vd.MultiSz, " ")
-	case vd.Uint64 != 0:
-		return strconv.FormatUint(vd.Uint64, 10)
 	case len(vd.Data) > 0:
 		return hex.EncodeToString(vd.Data)
 	}
@@ -190,12 +201,20 @@ func emitKey(reg *regparser.Registry, node *regparser.CM_KEY_NODE, keyPath strin
 	return n, nil
 }
 
-func runHive(hivePath string, b *batch, workDir string, replay bool, e *emitter) (int, error) {
-	reg, cleanup, _, err := openHive(hivePath, workDir, replay)
+func runHive(hivePath string, b *batch, workDir string, replay, quiet bool, e *emitter) (int, error) {
+	reg, cleanup, note, replayFailed, err := openHive(hivePath, workDir, replay)
 	if err != nil {
 		return 0, err
 	}
 	defer cleanup()
+	// A dirty-hive replay that fell back to the committed state is a fidelity
+	// warning (recent transactions may be missing), so surface it even under -q;
+	// a successful recovery is routine progress, shown only when not quiet.
+	if replayFailed {
+		fmt.Fprintf(os.Stderr, "gore: WARNING %s: %s\n", hivePath, note)
+	} else if !quiet && note != "" && note != "committed" {
+		fmt.Fprintf(os.Stderr, "gore: %s: %s\n", hivePath, note)
+	}
 	hiveType := hiveTypeOf(hivePath)
 	n := 0
 	for _, bk := range b.Keys {
@@ -370,7 +389,7 @@ func main() {
 		if dirMode && (isLogFile(p) || !looksLikeHive(p)) {
 			continue // a hive begins with "regf"; .LOG* are consumed via replay
 		}
-		n, err := runHive(p, &b, *workDir, replay, e)
+		n, err := runHive(p, &b, *workDir, replay, *quiet, e)
 		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "gore: FAILED %s: %v\n", p, err)
@@ -407,10 +426,12 @@ func main() {
 // into a recovered copy written under workDir (RecoverHive honours $TMPDIR), and
 // parses that; otherwise the committed hive. Graceful: a replay error or
 // unusable workDir falls back to the committed hive, never a hard fail.
-func openHive(p, workDir string, replay bool) (*regparser.Registry, func(), string, error) {
+// The returned bool is set when a dirty-hive .LOG replay was attempted but
+// failed and parsing fell back to the committed state (a fidelity warning).
+func openHive(p, workDir string, replay bool) (*regparser.Registry, func(), string, bool, error) {
 	hf, err := os.Open(p)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", false, err
 	}
 	var logs []*os.File
 	if replay {
@@ -434,21 +455,21 @@ func openHive(p, workDir string, replay bool) (*regparser.Registry, func(), stri
 			if nerr != nil {
 				recovered.Close()
 				os.Remove(recovered.Name())
-				return nil, nil, "", nerr
+				return nil, nil, "", false, nerr
 			}
-			return reg, func() { recovered.Close(); os.Remove(recovered.Name()) }, "recovered via .LOG replay", nil
+			return reg, func() { recovered.Close(); os.Remove(recovered.Name()) }, "recovered via .LOG replay", false, nil
 		}
 		reg, nerr := regparser.NewRegistry(hf)
 		if nerr != nil {
 			hf.Close()
-			return nil, nil, "", nerr
+			return nil, nil, "", false, nerr
 		}
-		return reg, func() { hf.Close() }, fmt.Sprintf("committed (.LOG replay failed: %v)", rerr), nil
+		return reg, func() { hf.Close() }, fmt.Sprintf("committed (.LOG replay failed: %v)", rerr), true, nil
 	}
 	reg, nerr := regparser.NewRegistry(hf)
 	if nerr != nil {
 		hf.Close()
-		return nil, nil, "", nerr
+		return nil, nil, "", false, nerr
 	}
-	return reg, func() { hf.Close() }, "committed", nil
+	return reg, func() { hf.Close() }, "committed", false, nil
 }

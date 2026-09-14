@@ -12,11 +12,13 @@
 // SHA-1 in Amcache (`FileId`) is a 44-char string with a "0000" prefix — it is
 // stripped to the bare 40-hex hash, exactly as byakugan's plaso amcache map does.
 //
-// LIMITATION: regparser reads the committed hive only — it does NOT replay the
-// .LOG1/.LOG2 dirty-hive transaction logs, so entries still pending in the logs
-// (which AmcacheParser replays) are not seen. This is stated, not faked; the
-// base hive carries the great majority of entries. Timestamps are RFC3339 (UTC),
-// empty when absent.
+// Dirty-hive .LOG1/.LOG2 transaction logs ARE replayed (regparser.RecoverHive)
+// when they sit beside the hive, matching AmcacheParser's fidelity. Replay writes
+// a recovered copy under --work-dir (default $TMPDIR), which must be writable —
+// the container rootfs is read-only, so the pipeline mounts a tmpfs there. If the
+// logs are absent, or replay fails, or the work dir is not writable, it falls
+// back to the committed hive with a one-line stderr note (never a hard fail).
+// Timestamps are RFC3339 (UTC), empty when absent.
 //
 // Exit codes: 0 = every hive parsed; 1 = usage or fatal error; 2 = at least one
 // file failed to parse (failures listed on stderr, the rest still emitted).
@@ -154,32 +156,77 @@ func (e *emitter) emit(r *record) error {
 	return e.enc.Encode(r)
 }
 
-// parseFile reads the Amcache hive at `p`, emitting one record per
-// InventoryApplicationFile entry; returns the number emitted.
-func parseFile(p string, e *emitter) (int, error) {
-	f, err := os.Open(p)
+// openHive opens the hive at `p` for reading. When sibling .LOG1/.LOG2 dirty-hive
+// transaction logs are present it replays them (regparser.RecoverHive) into a
+// recovered copy (written under $TMPDIR — the caller points that at --work-dir)
+// and returns that; otherwise it returns the committed hive. Returns a cleanup
+// to close (and delete any recovered copy), plus a note of which path was taken.
+// Replay is best-effort: on any failure it falls back to the committed hive.
+func openHive(p string) (*regparser.Registry, func(), string, error) {
+	hf, err := os.Open(p)
 	if err != nil {
-		return 0, err
+		return nil, nil, "", err
 	}
-	defer f.Close()
-	reg, err := regparser.NewRegistry(f)
+	var logs []*os.File
+	for _, suffix := range []string{".LOG1", ".LOG2"} {
+		if lf, lerr := os.Open(p + suffix); lerr == nil {
+			logs = append(logs, lf)
+		}
+	}
+	if len(logs) > 0 {
+		recovered, rerr := regparser.RecoverHive(hf, logs...)
+		for _, lf := range logs {
+			lf.Close()
+		}
+		if rerr == nil {
+			hf.Close() // done with the committed hive; parse the recovered copy
+			reg, nerr := regparser.NewRegistry(recovered)
+			if nerr != nil {
+				recovered.Close()
+				os.Remove(recovered.Name())
+				return nil, nil, "", nerr
+			}
+			return reg, func() { recovered.Close(); os.Remove(recovered.Name()) },
+				"recovered via .LOG replay", nil
+		}
+		// replay failed — fall back to the committed hive, never hard-fail
+		reg, nerr := regparser.NewRegistry(hf)
+		if nerr != nil {
+			hf.Close()
+			return nil, nil, "", nerr
+		}
+		return reg, func() { hf.Close() },
+			fmt.Sprintf("committed (.LOG replay failed: %v)", rerr), nil
+	}
+	reg, nerr := regparser.NewRegistry(hf)
+	if nerr != nil {
+		hf.Close()
+		return nil, nil, "", nerr
+	}
+	return reg, func() { hf.Close() }, "committed (no .LOG files)", nil
+}
+
+// parseHive emits one record per InventoryApplicationFile entry in the hive at
+// `p`. `found` is true only when the hive actually holds the Amcache key — a
+// plain SYSTEM/SOFTWARE regf hive returns (0, false, ...) so callers don't count
+// it as an Amcache source.
+func parseHive(p string, e *emitter) (n int, found bool, note string, err error) {
+	reg, cleanup, note, err := openHive(p)
 	if err != nil {
-		return 0, err
+		return 0, false, note, err
 	}
+	defer cleanup()
 	root := reg.OpenKey(amcacheKey)
 	if root == nil {
-		// Not a fatal parse error — an older hive without the modern inventory
-		// key simply yields nothing here (documented limitation).
-		return 0, nil
+		return 0, false, note, nil // a regf hive, but not an Amcache hive
 	}
-	n := 0
 	for _, sub := range root.Subkeys() {
 		if err := e.emit(entryToRecord(sub)); err != nil {
-			return n, err
+			return n, true, note, err
 		}
 		n++
 	}
-	return n, nil
+	return n, true, note, nil
 }
 
 const hiveMagic = "regf"
@@ -246,6 +293,7 @@ func main() {
 		jsonF   = flag.String("jsonf", "", "JSONL file name (default: Amcache_Output.jsonl)")
 		csvDir  = flag.String("csv", "", "directory to write CSV output to instead of JSONL")
 		csvF    = flag.String("csvf", "", "CSV file name (default: Amcache_Output.csv)")
+		workDir = flag.String("work-dir", os.TempDir(), "writable dir for the recovered hive when replaying .LOG files")
 		_       = flag.Bool("i", false, "include file entries (accepted for AmcacheParser compatibility; file entries are always emitted)")
 		quiet   = flag.Bool("q", false, "suppress per-file progress on stderr")
 	)
@@ -256,6 +304,15 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+
+	// regparser.RecoverHive writes its recovered copy under os.TempDir(), which
+	// honours $TMPDIR — point that at --work-dir so replay lands on a writable
+	// mount (the container rootfs is read-only). Best-effort: if the dir can't be
+	// made, replay will just fail and fall back to the committed hive.
+	if err := os.MkdirAll(*workDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "goamcache: work dir %s not usable (%v); .LOG replay will fall back to committed hives\n", *workDir, err)
+	}
+	os.Setenv("TMPDIR", *workDir)
 
 	dirMode := *dir != ""
 	inputs, err := collectInputs(*file, *dir)
@@ -294,21 +351,29 @@ func main() {
 		e.enc = json.NewEncoder(w)
 	}
 
-	failed, parsed, entries := 0, 0, 0
+	failed, sources, entries := 0, 0, 0
 	for _, p := range inputs {
 		if dirMode && !looksLikeHive(p) {
 			continue // -d: pick registry hives out of the tree by their regf signature
 		}
-		n, err := parseFile(p, e)
+		n, found, note, err := parseHive(p, e)
 		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "goamcache: FAILED %s: %v\n", p, err)
 			continue
 		}
-		parsed++
+		if !found {
+			// a regf hive without the Amcache key (SYSTEM/SOFTWARE, wrong hive):
+			// not an Amcache source — never counted or logged as "parsed"
+			if !dirMode && !*quiet {
+				fmt.Fprintf(os.Stderr, "goamcache: %s has no %s key (not an Amcache hive)\n", p, amcacheKey)
+			}
+			continue
+		}
+		sources++
 		entries += n
 		if !*quiet {
-			fmt.Fprintf(os.Stderr, "goamcache: parsed %s (%d entries)\n", p, n)
+			fmt.Fprintf(os.Stderr, "goamcache: parsed %s (%d entries, %s)\n", p, n, note)
 		}
 	}
 	if e.cw != nil {
@@ -318,12 +383,19 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if dirMode && parsed == 0 && failed == 0 {
-		fmt.Fprintf(os.Stderr, "goamcache: no registry hive found under %s\n", *dir)
+	if dirMode && sources == 0 && failed == 0 {
+		fmt.Fprintf(os.Stderr, "goamcache: no Amcache hive found under %s\n", *dir)
 		os.Exit(1)
 	}
 	if !*quiet {
-		fmt.Fprintf(os.Stderr, "goamcache: %d entries across %d hive(s)\n", entries, parsed)
+		fmt.Fprintf(os.Stderr, "goamcache: %d entries across %d Amcache hive(s)\n", entries, sources)
+	}
+	// A run that scanned input but emitted nothing is not a silent success:
+	// exit non-zero so an empty result (a non-Amcache -f target, or hives that
+	// yielded no entries) is caught rather than passing as done.
+	if entries == 0 && failed == 0 {
+		fmt.Fprintln(os.Stderr, "goamcache: no Amcache records emitted")
+		os.Exit(1)
 	}
 	if failed > 0 {
 		fmt.Fprintf(os.Stderr, "goamcache: %d file(s) failed to parse\n", failed)

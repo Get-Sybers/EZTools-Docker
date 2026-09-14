@@ -9,16 +9,20 @@
 # ProgramId, SHA-1, full path, name, publisher/product/version, size) as CSV or
 # JSONL. Same get-sybers/<tool> pattern and CLI as the other GoDFIR tools.
 #
-# LIMITATION (see main.go): regparser reads the committed hive only — it does not
-# replay the .LOG1/.LOG2 dirty-hive transaction logs.
+# Dirty-hive .LOG1/.LOG2 replay (see main.go): when the logs sit beside the hive
+# it recovers them into a copy written under --work-dir. That dir must be
+# WRITABLE — the rootfs is read-only, so mount a tmpfs and point --work-dir at it
+# (the zimmerman lane adds `--tmpfs /work:...`, like wxtcmd). Without a writable
+# work dir, replay just falls back to the committed hive (a stderr note).
 #
 # The final image is FROM scratch: one static binary, nothing else — no shell,
 # no python, no package manager, no setuid, no libc; runs as uid 2000.
 #
 #   docker build -t get-sybers/goamcache:latest -f goamcache/Dockerfile goamcache
-#   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
-#     --network none --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-#     get-sybers/goamcache:latest -f /input/Amcache.hve --csv /output --csvf amcache.csv -i
+#   docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+#     --read-only --tmpfs /work:rw,nosuid,nodev,uid=2000,gid=2000 \
+#     -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+#     get-sybers/goamcache:latest -f /input/Amcache.hve --csv /output --csvf amcache.csv -i --work-dir /work
 
 ARG GO_VERSION=1.24
 

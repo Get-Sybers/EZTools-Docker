@@ -4,7 +4,7 @@
 # still on .NET (eztool/Dockerfile), the GoDFIR Go tools (goprefetch/, goese/,
 # gorb/), and — on request — the all-in-one image (eztools-all/).
 #
-#   ./build-all.sh                 # every .NET per-tool image + goprefetch + goese + gorb + gomft
+#   ./build-all.sh                 # every .NET per-tool image + goprefetch + goese + gorb + gomft + goamcache
 #   ./build-all.sh recmd mftecmd   # a subset (names case-insensitive)
 #   ./build-all.sh all-in-one      # the single get-sybers/eztools image
 #   ./build-all.sh goprefetch goese gorb
@@ -21,7 +21,7 @@ cd "$(dirname "$0")"
 # Zip basenames on download.ericzimmermanstools.com/net9/ — casing matters for
 # the download URL, so keep these exactly as published.
 LINUX_TOOLS=(
-  AmcacheParser bstrings EvtxECmd iisGeolocate JLECmd
+  bstrings EvtxECmd iisGeolocate JLECmd
   LECmd RecentFileCacheParser RECmd rla SBECmd SQLECmd WxTCmd
 )
 
@@ -54,6 +54,11 @@ build_gomft() {
   docker build -t get-sybers/gomft:latest -f gomft/Dockerfile gomft
 }
 
+build_goamcache() {
+  echo "==> get-sybers/goamcache (Go, AmcacheParser substitute)"
+  docker build -t get-sybers/goamcache:latest -f goamcache/Dockerfile goamcache
+}
+
 build_goappcompat() {
   echo "==> get-sybers/goappcompat (Go, AppCompatCacheParser substitute)"
   docker build -t get-sybers/goappcompat:latest -f goappcompat/Dockerfile goappcompat
@@ -72,6 +77,7 @@ resolve() {
     goese|esedump|srum|srumecmd|sumecmd) build_goese; return ;;
     gorb|rbcmd) build_gorb; return ;;
     gomft|mftecmd) build_gomft; return ;;
+    goamcache|amcacheparser) build_goamcache; return ;;
     goappcompat|appcompatcacheparser) build_goappcompat; return ;;
     all-in-one|eztools|all) build_all_in_one; return ;;
     vscmount)
@@ -86,8 +92,8 @@ resolve() {
       return
     fi
   done
-  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goappcompat all-in-one" >&2
-  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, appcompatcacheparser)" >&2
+  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goamcache goappcompat all-in-one" >&2
+  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, amcacheparser, appcompatcacheparser)" >&2
   exit 1
 }
 
@@ -99,6 +105,7 @@ else
   build_goese
   build_gorb
   build_gomft
+  build_goamcache
   build_goappcompat
 fi
 echo "done."

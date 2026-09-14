@@ -4,8 +4,8 @@
 # still on .NET (eztool/Dockerfile), the GoDFIR Go tools (goprefetch/, goese/,
 # gorb/), and — on request — the all-in-one image (eztools-all/).
 #
-#   ./build-all.sh                 # every .NET per-tool image + the Go tools
-#   ./build-all.sh recmd mftecmd   # a subset (names case-insensitive)
+#   ./build-all.sh                 # every .NET per-tool image + all the Go tools
+#   ./build-all.sh gore mftecmd    # a subset (names case-insensitive)
 #   ./build-all.sh all-in-one      # the single get-sybers/eztools image
 #   ./build-all.sh goprefetch goese gorb
 #
@@ -13,18 +13,19 @@
 # README): goprefetch and goese are their Go substitutes. gorb replaces RBCmd
 # (Linux-viable under .NET) with a static Go binary to drop the .NET runtime.
 # As each remaining .NET tool is ported to Go it gets a go-name too (RECmd ->
-# gore, ...) — DX_DFIR #188 initiative 2. Ported so far: MFTECmd -> gomft
-# (go-ntfs), EvtxECmd -> goevtx (go-evtx), Amcache/AppCompatCache ->
-# goamcache/goappcompat (regparser), LECmd -> gole (golnk), JLECmd -> gojle
-# (mscfb), plus gorb/goprefetch/goese.
+# gore, SBECmd -> gosbe, WxTCmd -> gowxt, ...) — DX_DFIR #188 initiative 2.
+# Ported so far: MFTECmd -> gomft (go-ntfs), EvtxECmd -> goevtx (go-evtx),
+# Amcache/AppCompatCache -> goamcache/goappcompat, RECmd -> gore, SBECmd -> gosbe
+# (regparser), LECmd -> gole (golnk), JLECmd -> gojle (mscfb), WxTCmd -> gowxt
+# (modernc sqlite), plus gorb/goprefetch/goese.
 set -Eeuo pipefail
 cd "$(dirname "$0")"
 
 # Zip basenames on download.ericzimmermanstools.com/net9/ — casing matters for
-# the download URL, so keep these exactly as published.
+# the download URL, so keep these exactly as published. RECmd, SBECmd and WxTCmd
+# have been ported to Go (gore/gosbe/gowxt) and are no longer built from .NET here.
 LINUX_TOOLS=(
-  bstrings iisGeolocate
-  RecentFileCacheParser RECmd rla SBECmd SQLECmd
+  bstrings iisGeolocate RecentFileCacheParser rla SQLECmd
 )
 
 lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -71,6 +72,16 @@ build_goevtx() {
   docker build -t get-sybers/goevtx:latest -f goevtx/Dockerfile goevtx
 }
 
+build_gore() {
+  echo "==> get-sybers/gore (Go, RECmd substitute)"
+  docker build -t get-sybers/gore:latest -f gore/Dockerfile gore
+}
+
+build_gosbe() {
+  echo "==> get-sybers/gosbe (Go, SBECmd substitute)"
+  docker build -t get-sybers/gosbe:latest -f gosbe/Dockerfile gosbe
+}
+
 build_gole() {
   echo "==> get-sybers/gole (Go, LECmd substitute)"
   docker build -t get-sybers/gole:latest -f gole/Dockerfile gole
@@ -102,6 +113,8 @@ resolve() {
     goamcache|amcacheparser) build_goamcache; return ;;
     goappcompat|appcompatcacheparser) build_goappcompat; return ;;
     goevtx|evtxecmd) build_goevtx; return ;;
+    gore|recmd) build_gore; return ;;
+    gosbe|sbecmd) build_gosbe; return ;;
     gole|lecmd) build_gole; return ;;
     gojle|jlecmd) build_gojle; return ;;
     gowxt|wxtcmd) build_gowxt; return ;;
@@ -118,8 +131,8 @@ resolve() {
       return
     fi
   done
-  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goamcache goappcompat goevtx gole gojle gowxt all-in-one" >&2
-  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, amcacheparser, appcompatcacheparser, evtxecmd, lecmd, jlecmd, wxtcmd)" >&2
+  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goamcache goappcompat goevtx gore gosbe gole gojle gowxt all-in-one" >&2
+  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, amcacheparser, appcompatcacheparser, evtxecmd, recmd, sbecmd, lecmd, jlecmd, wxtcmd)" >&2
   exit 1
 }
 
@@ -134,6 +147,8 @@ else
   build_goamcache
   build_goappcompat
   build_goevtx
+  build_gore
+  build_gosbe
   build_gole
   build_gojle
   build_gowxt

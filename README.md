@@ -23,9 +23,9 @@ artefacts natively.
 | **PECmd** | **`get-sybers/goprefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `goprefetch` parses XP→Win11 `.pf` natively, MAM-compressed included |
 | **RBCmd** | **`get-sybers/gorb` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary to drop the .NET runtime — parses v1/v2 `$I` records |
 | RecentFileCacheParser | `get-sybers/recentfilecacheparser` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
-| RECmd | `get-sybers/recmd` | ✅ parse-verified (BatchExamples/ baked in) |
-| RLA | `get-sybers/rla` | ☑️ pure managed .NET (same Registry library whose LOG replay already works on Linux via AppCompatCacheParser/SBECmd) |
-| SBECmd | `get-sybers/sbecmd` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
+| **RECmd** | **`get-sybers/gore` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (regparser) to drop the .NET runtime — real-hive verified (SYSTEM/SOFTWARE/NTUSER.DAT with `.LOG` replay, through byakugan's `recmd_batch` map) |
+| RLA | `get-sybers/rla` | ☑️ pure managed .NET (same Registry library whose LOG replay already works on Linux via goamcache/goappcompat) |
+| **SBECmd** | **`get-sybers/gosbe` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (regparser) to drop the .NET runtime — real-UsrClass.dat shellbags verified (BagMRU tree, BEEF0004 long names, `.LOG` replay) |
 | SQLECmd | `get-sybers/sqlecmd` | ✅ parse-verified (Maps/ baked in) |
 | **SrumECmd** | **`get-sybers/goese` (Go substitute)** | ❌ SrumECmd cannot parse on Linux → `goese` parses SRUDB.dat natively with IdMap/SID enrichment |
 | **SumECmd** | **`get-sybers/goese` (Go substitute)** | ❌ SumECmd cannot parse on Linux → `goese` reads SUM `Current.mdb` (any ESE database) |
@@ -226,6 +226,73 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --jsonf Security_EvtxECmd_Output.json --xml /output --xmlf Security_EvtxECmd_Output.xml
 ```
 
+### `get-sybers/gore` — gore (replaces RECmd)
+
+Like the other registry tools, RECmd parses on Linux under .NET; this substitute
+drops the .NET runtime with a static Go binary on Velociraptor's `regparser`. It
+reads a **batch file** (`.reb` YAML: a list of keys with `HiveType`, `Category`,
+`KeyPath`, `ValueName`, `Recursive`, `Comment`), walks each requested key in each
+hive under `-d` (hives content-detected by their `regf` header, `HiveType`
+inferred from the file name; `.LOG*` files skipped), and emits one record per
+value — `HivePath`, `HiveType`, `Category`, `Description`, `Comment`, `KeyPath`,
+`ValueName`, `ValueType`, `ValueData`, `LastWriteTimestamp`, `Recursive`,
+`Deleted` — as JSONL or CSV, the exact shape byakugan's `recmd_batch` map
+consumes.
+
+The bundled `/batch/default.reb` is a **curated** forensic-key set (Run/RunOnce,
+TypedPaths, ComputerName/TimeZone, …), **not** Eric Zimmerman's `Kroll_Batch.reb`
+(which is not redistributable here) — supply your own with `--bn`. Honest
+coverage gaps vs .NET RECmd: no RECmd **plugins** (the derived-value transforms),
+no **deleted-cell recovery** (`Deleted` is always false), and the batch is the
+curated set above rather than the full Kroll batch.
+
+Parse-verified end to end on a real image (`rolf_long`, extracted SYSTEM /
+SOFTWARE / NTUSER.DAT with `.LOG1/.LOG2` replayed): gore's 18 records fed
+straight through byakugan's `recmd_batch` map yielded 18 CAR `registry` /
+`value_edit` events — including a real OneDrive Run-key persistence entry for
+user `patcher`.
+
+```sh
+docker build -t get-sybers/gore:latest -f gore/Dockerfile gore
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only --tmpfs /work:rw,nosuid,nodev,uid=2000,gid=2000 \
+  -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/gore:latest -d /input --json /output \
+  --jsonf RECmd_Batch_Output.json --work-dir /work
+```
+
+### `get-sybers/gosbe` — gosbe (replaces SBECmd)
+
+SBECmd parses ShellBags on Linux under .NET; this substitute drops the .NET
+runtime with a static Go binary on `regparser`. It walks the **BagMRU** tree in
+`NTUSER.DAT` / `UsrClass.dat` (all the Shell / ShellNoRoam roots), decodes the
+shell items, reconstructs each shellbag's `AbsolutePath`, and emits one record
+per shellbag — `BagPath`, `Slot`, `NodeSlot`, `MRUPosition`, `ShellType`,
+`Value`, `AbsolutePath`, `LastWriteTime` — as JSONL.
+
+Shell-item decoding is faithful for the common types: `0x1F` root/GUID folders
+(mapped to known-folder names, e.g. *My Computer*, *Downloads*), `0x2F` volumes
+(drive letters), and `0x30-0x3F` file/directory entries (the `BEEF0004`
+extension's Unicode long name, with the ANSI short name as fallback). Honest
+coverage gap: other shell-item types (property/delegate `0x00`, network
+`0x40-0x4F`, URI `0x61`, …) are emitted with their `ShellType` and hex value but
+**no reconstructed name** — never an invented path.
+
+Parse-verified end to end on a real image (`rolf_long`, extracted
+`Users/patcher/…/UsrClass.dat`, `.LOG1/.LOG2` replayed): gosbe reconstructed 36
+shellbags — the user's browse trail including `C:\Users\patcher\Downloads\
+survey.zip`, `…\AppData\Roaming\Wondershare\Wondershare Filmora`, a mapped
+`Z:\ls_evidence` evidence drive, and the `Start Menu\Programs\Startup` folder.
+
+```sh
+docker build -t get-sybers/gosbe:latest -f gosbe/Dockerfile gosbe
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only --tmpfs /work:rw,nosuid,nodev,uid=2000,gid=2000 \
+  -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/gosbe:latest -d /input --json /output \
+  --jsonf SBECmd_Output.json --work-dir /work
+```
+
 ### `get-sybers/gole` — gole (replaces LECmd)
 
 Like the other Linux-viable tools, LECmd parses on Linux under .NET; this
@@ -299,7 +366,7 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   get-sybers/gowxt:latest -f /input/ActivitiesCache.db --csv /output --work-dir /work
 ```
 
-All ten Go images are `FROM scratch`: one static binary, no shell, no python, no
+All twelve Go images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 
@@ -316,7 +383,7 @@ ships `rla.dll`), and the run-as uid/gid honour the `DFIR_UID`/`DFIR_GID`
 build args the DX_DFIR image role passes.
 
 ```sh
-docker build -t get-sybers/recmd:latest    --build-arg EZTOOL=RECmd    -f eztool/Dockerfile .
+docker build -t get-sybers/jlecmd:latest   --build-arg EZTOOL=JLECmd   -f eztool/Dockerfile .
 docker build -t get-sybers/bstrings:latest --build-arg EZTOOL=bstrings -f eztool/Dockerfile .
 # pin the release:
 docker build -t get-sybers/sqlecmd:latest  --build-arg EZTOOL=SQLECmd \
@@ -372,9 +439,9 @@ both:
    `*.pf`; `goese -d /image` finds every SRUM database (`SRUDB.dat`) and
    SUM database (`*.mdb` under a `SUM/` directory) case-insensitively and
    dumps each into its own sub-directory (`SRUM_SRUDB/`, `SUM_Current/`, …)
-   with a `SourceDb` field on every row. The .NET tools that take `-d`
-   (EvtxECmd, LECmd, JLECmd, SBECmd, …) can be pointed at the mounted root
-   the same way.
+   with a `SourceDb` field on every row. Every other tool that takes `-d` —
+   the Go substitutes `goevtx`/`gore`/`gosbe` and the remaining .NET tools
+   (LECmd, JLECmd, SQLECmd, …) — can be pointed at the mounted root the same way.
 2. **Extracted / loose files** — a staged directory of `.evtx`, hives, `.pf`,
    or a single database: same containers, `-d` at the staged directory or
    `-f` at the file.
@@ -385,8 +452,9 @@ The images are offline parsers — run them with nothing but mounts:
 
 ```sh
 docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
-  --read-only --tmpfs /tmp -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
-  get-sybers/recmd:latest -d /input --bn /opt/eztool/BatchExamples/Kroll_Batch.reb --csv /output
+  --read-only --tmpfs /work:rw,nosuid,nodev,uid=2000,gid=2000 \
+  -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/gore:latest -d /input --csv /output --work-dir /work
 ```
 
 Two things dominate wall-clock time on real evidence:
@@ -421,8 +489,11 @@ what the DX_DFIR pipeline's image role does after every build.
 
 ## Linux run notes learned from real evidence
 
-- **AppCompatCacheParser / SBECmd**: a dirty hive needs its transaction LOGs
-  (`.LOG1`/`.LOG2`) extracted alongside, or the tool aborts.
+- **Registry hives (goamcache / goappcompat / gore / gosbe)**: a dirty hive
+  needs its transaction LOGs (`.LOG1`/`.LOG2`) extracted alongside. The Go tools
+  replay them into a recovered copy under `--work-dir`, which must be a WRITABLE
+  tmpfs (the rootfs is read-only) — without one, replay falls back to the
+  committed hive with a stderr note rather than aborting.
 - **WxTCmd**: see the tmpfs note above.
 - **iisGeolocate**: keep its MaxMind `.mmdb` databases current — mount them
   read-only over the baked copies if the release's are stale.

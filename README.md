@@ -17,8 +17,8 @@ artefacts natively.
 | bstrings | `get-sybers/bstrings` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
 | **EvtxECmd** | **`get-sybers/goevtx` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (go-evtx) to drop the .NET runtime — real-.evtx verified end-to-end through byakugan's evtx maps |
 | iisGeolocate | `get-sybers/iisgeolocate` | ☑️ pure managed .NET — mount/refresh its GeoLite2 `.mmdb` databases if the release doesn't bundle current ones |
-| JLECmd | `get-sybers/jlecmd` | ✅ parse-verified |
-| LECmd | `get-sybers/lecmd` | ✅ parse-verified |
+| **JLECmd** | **`get-sybers/gojle` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (mscfb) to drop the .NET runtime — real jump lists verified end-to-end through byakugan's `jlecmd_dest` map |
+| **LECmd** | **`get-sybers/gole` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (golnk) to drop the .NET runtime — real `.lnk` verified |
 | **MFTECmd** | **`get-sybers/gomft` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (go-ntfs) to drop the .NET runtime — real-$MFT verified |
 | **PECmd** | **`get-sybers/goprefetch` (Go substitute)** | ❌ PECmd itself cannot parse on Linux → `goprefetch` parses XP→Win11 `.pf` natively, MAM-compressed included |
 | **RBCmd** | **`get-sybers/gorb` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary to drop the .NET runtime — parses v1/v2 `$I` records |
@@ -226,6 +226,55 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --jsonf Security_EvtxECmd_Output.json --xml /output --xmlf Security_EvtxECmd_Output.xml
 ```
 
+### `get-sybers/gole` — gole (replaces LECmd)
+
+Like the other Linux-viable tools, LECmd parses on Linux under .NET; this
+substitute drops the .NET runtime with a static Go binary on `parsiya/golnk`. It
+parses Windows Shell Link (`.lnk`) files and emits one record per shortcut in the
+LECmd operator/CSV shape — target `Created`/`Modified`/`Accessed`, `FileSize`,
+`LocalPath`, `RelativePath`, `WorkingDirectory`, `Arguments`, `IconLocation`,
+`CommonPath`, and the decoded `HeaderFlags`/`FileAttributes` sets — as JSONL or
+CSV. `-d` content-detects `.lnk` by the `0x4C` Shell Link header, so Plaso's
+`$→_` image_export rename doesn't hide them.
+
+Verified on real evidence: all 10 `.lnk` recovered from an actual host image
+(`Users/patcher/…/Recent/`) parsed with zero failures, recovering the true target
+paths (`C:\Users\patcher\Downloads\survey.zip`, `…\gen_2.py`), target timestamps
+and flag sets.
+
+```sh
+docker build -t get-sybers/gole:latest -f gole/Dockerfile gole
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/gole:latest -d /input --csv /output --csvf LECmd_Output.csv
+```
+
+### `get-sybers/gojle` — gojle (replaces JLECmd)
+
+JLECmd parses on Linux under .NET; this substitute drops the .NET runtime with a
+static Go binary that reads AutomaticDestinations (`*.automaticDestinations-ms`,
+an OLE compound file, via `richardlehane/mscfb`) and their `DestList` stream. It
+emits one record per jump-list file in the JLECmd AutomaticDestinations shape
+byakugan's `jlecmd_dest` map / `jlecmd` adapter consume: `AppId`
+(with the well-known friendly name), `SourceFile`, and the per-target
+`DestListEntries` — `Path`, `EntryNumber`, `CreatedOn` (recovered from each
+entry's embedded LNK stream), `LastModified`, `Hostname`, `InteractionCount`,
+`MRUPosition`, `Pinned`, `MacAddress` (from the FileDroid GUID node) and
+`VolumeDroid`. DestList versions 1/3/4 are handled; CustomDestinations files are
+skipped, never mis-parsed (byakugan consumes the AutomaticDestinations shape).
+
+Verified end to end on real evidence: the 6 AutomaticDestinations jump lists from
+an actual host image fed straight through byakugan's `jlecmd_dest` map yielded 14
+correct CAR `file/read` events — real target paths, `LastModified` timestamps,
+hostname `desktop-b2lequd`, pinned/known-folder flags and the creating host's MAC.
+
+```sh
+docker build -t get-sybers/gojle:latest -f gojle/Dockerfile gojle
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/gojle:latest -d /input --json /output --jsonf JLECmd_Output.json
+```
+
 ### `get-sybers/gowxt` — gowxt (replaces WxTCmd)
 
 Like RBCmd/MFTECmd, WxTCmd parses on Linux under .NET; this substitute drops the
@@ -250,7 +299,7 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   get-sybers/gowxt:latest -f /input/ActivitiesCache.db --csv /output --work-dir /work
 ```
 
-All eight Go images are `FROM scratch`: one static binary, no shell, no python, no
+All ten Go images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 

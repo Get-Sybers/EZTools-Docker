@@ -29,7 +29,9 @@ func makeV3Entry(entryNum uint32, host string, mac []byte, lastMod time.Time, pi
 	binary.LittleEndian.PutUint16(e[14:], 0x3333)
 	e[16], e[17] = 0x44, 0x55
 	copy(e[18:24], []byte{0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB})
-	// 0x18 FileDroid: node (last 6 bytes, 0x22..0x27) carries the MAC
+	// 0x18 FileDroid: version nibble (high nibble of byte 7 of the GUID) must be
+	// 1 (time-based) for the node to be treated as a real MAC; node = last 6 bytes.
+	e[24+7] = 0x11 // third GUID group high byte → version 1
 	copy(e[24+10:24+16], mac)
 	// 0x48 Hostname (16 bytes, NUL padded)
 	copy(e[72:88], []byte(host))
@@ -105,6 +107,54 @@ func TestParseDestListPinnedFlag(t *testing.T) {
 func TestMacFromFileDroidZeroIsEmpty(t *testing.T) {
 	if got := macFromFileDroid(make([]byte, 16)); got != "" {
 		t.Errorf("all-zero droid should yield empty MAC, got %q", got)
+	}
+}
+
+func TestMacFromFileDroidNonV1IsEmpty(t *testing.T) {
+	// A v4 (random) UUID has a non-zero node but must NOT be read as a MAC.
+	b := make([]byte, 16)
+	b[7] = 0x41                              // version nibble = 4
+	copy(b[10:16], []byte{1, 2, 3, 4, 5, 6}) // non-zero node
+	if got := macFromFileDroid(b); got != "" {
+		t.Errorf("non-v1 UUID must yield empty MAC, got %q", got)
+	}
+}
+
+func TestMacFromFileDroidV1Extracts(t *testing.T) {
+	b := make([]byte, 16)
+	b[7] = 0x11 // version nibble = 1
+	copy(b[10:16], []byte{0x00, 0x0C, 0x29, 0xAB, 0xCD, 0xEF})
+	if got := macFromFileDroid(b); got != "00:0C:29:AB:CD:EF" {
+		t.Errorf("v1 UUID MAC = %q", got)
+	}
+}
+
+func TestParseDestListTruncatedIsError(t *testing.T) {
+	when := time.Now()
+	entry := makeV3Entry(1, "H", []byte{0, 0xC, 0x29, 1, 2, 3}, when, -1, 1, `C:\x\y.zip`)
+	hdr := make([]byte, 32)
+	binary.LittleEndian.PutUint32(hdr[0:], 3)
+	binary.LittleEndian.PutUint32(hdr[4:], 2) // header claims 2 entries
+	full := append(hdr, entry...)
+	// Cut the stream inside the path of the (only present) first entry.
+	got, err := parseDestList(full[:len(full)-6])
+	if err == nil {
+		t.Fatalf("truncated DestList must return an error, got %d entries and nil err", len(got))
+	}
+}
+
+func TestParseDestListShortOfDeclaredIsError(t *testing.T) {
+	when := time.Now()
+	entry := makeV3Entry(1, "H", []byte{0, 0xC, 0x29, 1, 2, 3}, when, -1, 1, `C:\x\y.zip`)
+	hdr := make([]byte, 32)
+	binary.LittleEndian.PutUint32(hdr[0:], 3)
+	binary.LittleEndian.PutUint32(hdr[4:], 5) // header claims 5 but only 1 present
+	got, err := parseDestList(append(hdr, entry...))
+	if err == nil {
+		t.Fatalf("parsing fewer than declared entries must error; got %d entries, nil err", len(got))
+	}
+	if len(got) != 1 {
+		t.Errorf("should still return the 1 entry it parsed, got %d", len(got))
 	}
 }
 

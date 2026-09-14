@@ -94,10 +94,17 @@ func guidString(b []byte) string {
 }
 func be16(b []byte) uint16 { return uint16(b[0])<<8 | uint16(b[1]) }
 
-// macFromFileDroid: a v1 (time-based) UUID's node (last 6 bytes) is the creating
-// host's MAC. Empty when the droid is all-zero or not v1.
+// macFromFileDroid: only a v1 (time-based) UUID carries the creating host's MAC
+// in its node (last 6 bytes). The version is the high nibble of the third GUID
+// group, i.e. the top nibble of byte 7 (Windows stores that group little-endian,
+// so byte 7 is its most-significant byte). Any other version means the node is
+// random/hash bits, not a MAC — return empty rather than a bogus address. Also
+// empty when the droid is absent or all-zero.
 func macFromFileDroid(b []byte) string {
 	if len(b) < 16 {
+		return ""
+	}
+	if b[7]>>4 != 1 { // UUID version nibble != 1 (not time-based) → no MAC
 		return ""
 	}
 	node := b[10:16]
@@ -131,6 +138,7 @@ func parseDestList(data []byte) ([]destEntry, error) {
 		return nil, fmt.Errorf("DestList too small (%d bytes)", len(data))
 	}
 	version := binary.LittleEndian.Uint32(data[0:4])
+	numEntries := binary.LittleEndian.Uint32(data[4:8]) // header's declared entry count
 	off := 32
 	var entries []destEntry
 	pos := 0
@@ -160,12 +168,12 @@ func parseDestList(data []byte) ([]destEntry, error) {
 			pathLenOff = off + 128
 		}
 		if pathLenOff+2 > len(data) {
-			break
+			return entries, fmt.Errorf("DestList truncated: entry %d path length runs past end of stream", pos)
 		}
 		nChars := int(binary.LittleEndian.Uint16(data[pathLenOff : pathLenOff+2]))
 		pathOff = pathLenOff + 2
 		if nChars <= 0 || pathOff+nChars*2 > len(data) {
-			break
+			return entries, fmt.Errorf("DestList corrupt/truncated: entry %d has bad path length %d", pos, nChars)
 		}
 		path := utf16le(data[pathOff : pathOff+nChars*2])
 		entries = append(entries, destEntry{
@@ -185,9 +193,16 @@ func parseDestList(data []byte) ([]destEntry, error) {
 			next += 4 // v4 has a 4-byte "unknown" tail after the path
 		}
 		if next <= off {
-			break
+			return entries, fmt.Errorf("DestList corrupt: entry %d made no forward progress", pos)
 		}
 		off = next
+	}
+	// The loop exits when the remaining bytes can't hold another entry's fixed
+	// prefix. If we parsed fewer than the header declared, the stream was cut
+	// short mid-record — surface it so the caller counts the file as failed
+	// rather than reporting a clean partial parse.
+	if numEntries > 0 && uint32(len(entries)) < numEntries {
+		return entries, fmt.Errorf("DestList truncated: parsed %d of %d declared entries", len(entries), numEntries)
 	}
 	return entries, nil
 }
@@ -212,8 +227,11 @@ func parseOne(path string) (*record, error) {
 	lnkStreams := map[string][]byte{}
 	for {
 		entry, err := doc.Next()
+		if err == io.EOF {
+			break // clean end of stream enumeration
+		}
 		if err != nil {
-			break
+			return nil, fmt.Errorf("mscfb enumerate: %w", err) // parse/IO failure → file fails
 		}
 		data := readStream(doc, entry)
 		if strings.EqualFold(entry.Name, "DestList") {

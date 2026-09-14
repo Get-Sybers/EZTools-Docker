@@ -1,10 +1,12 @@
 // gole — Linux-native Windows .lnk (shortcut) parser for the DX_DFIR pipeline.
 //
 // A static-Go substitute for Eric Zimmerman's LECmd: it parses .lnk shell-link
-// files with parsiya/golnk and emits LECmd's JSON columns (source/target MACB
-// times, target path, working dir, arguments, name, relative path, file size,
-// header/attribute flags). It runs on Linux with no .NET, no shell and no libc
-// (FROM scratch, uid 2000), matching the get-sybers hardening contract.
+// files with parsiya/golnk and emits LECmd's JSON columns (source mtime/atime,
+// target MACB times, target path, working dir, arguments, name, relative path,
+// file size, header/attribute flags). It runs on Linux with no .NET, no shell
+// and no libc (FROM scratch, uid 2000), matching the get-sybers hardening
+// contract. Source birth time (LECmd's SourceCreated) is not exposed by the Go
+// stdlib on Linux, so that column is dropped rather than emitted always-empty.
 //
 // Fields golnk does not resolve (a fully-walked TargetIDAbsolutePath from the
 // ID list, MFT entry/sequence, tracker MAC) are not emitted — never faked; the
@@ -27,14 +29,19 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	lnk "github.com/parsiya/golnk"
 )
 
 type record struct {
-	SourceFile           string `json:"SourceFile"`
-	SourceCreated        string `json:"SourceCreated"`
+	SourceFile string `json:"SourceFile"`
+	// SourceCreated (the .lnk's own birth time) is deliberately absent: Linux
+	// does not expose a file birth time through the Go stdlib, so LECmd's
+	// SourceCreated column can never be populated here — we drop it rather than
+	// emit an always-empty field. SourceModified/SourceAccessed come from the
+	// .lnk file's own mtime/atime.
 	SourceModified       string `json:"SourceModified"`
 	SourceAccessed       string `json:"SourceAccessed"`
 	TargetCreated        string `json:"TargetCreated"`
@@ -54,14 +61,14 @@ type record struct {
 }
 
 var csvHeader = []string{
-	"SourceFile", "SourceCreated", "SourceModified", "SourceAccessed",
+	"SourceFile", "SourceModified", "SourceAccessed",
 	"TargetCreated", "TargetModified", "TargetAccessed", "FileSize", "Name",
 	"RelativePath", "WorkingDirectory", "Arguments", "IconLocation", "LocalPath",
 	"CommonPath", "TargetIDAbsolutePath", "HeaderFlags", "FileAttributes",
 }
 
 func (r *record) csvRow() []string {
-	return []string{r.SourceFile, r.SourceCreated, r.SourceModified, r.SourceAccessed,
+	return []string{r.SourceFile, r.SourceModified, r.SourceAccessed,
 		r.TargetCreated, r.TargetModified, r.TargetAccessed, strconv.FormatUint(uint64(r.FileSize), 10),
 		r.Name, r.RelativePath, r.WorkingDirectory, r.Arguments, r.IconLocation, r.LocalPath,
 		r.CommonPath, r.TargetIDAbsolutePath, r.HeaderFlags, r.FileAttributes}
@@ -116,9 +123,15 @@ func parseOne(path string) (*record, error) {
 		HeaderFlags:      setFlags(f.Header.LinkFlags),
 		FileAttributes:   setFlags(f.Header.FileAttributes),
 	}
-	// the .lnk file's own fs timestamps (LECmd's Source* columns)
+	// the .lnk file's own fs timestamps (LECmd's Source* columns). mtime is
+	// portable; atime comes from the Linux stat_t (the container is Linux). A
+	// birth time (SourceCreated) is not exposed by the Go stdlib on Linux, so
+	// that column is intentionally not part of the schema — see the record type.
 	if st, err := os.Stat(path); err == nil {
-		rec.SourceModified = st.ModTime().UTC().Format(time.RFC3339Nano)
+		rec.SourceModified = ts(st.ModTime())
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+			rec.SourceAccessed = ts(time.Unix(sys.Atim.Unix()))
+		}
 	}
 	return rec, nil
 }

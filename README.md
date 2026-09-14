@@ -13,7 +13,7 @@ artefacts natively.
 | Requested tool | Image | Linux status |
 | --- | --- | --- |
 | **AmcacheParser** | **`get-sybers/goamcache` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (regparser) to drop the .NET runtime — real-hive verified |
-| AppCompatCacheParser | `get-sybers/appcompatcacheparser` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
+| **AppCompatCacheParser** | **`get-sybers/goappcompat` (Go substitute)** | ✅ Linux-viable under .NET, ported to a static Go binary (regparser) to drop .NET — real-SYSTEM-hive verified |
 | bstrings | `get-sybers/bstrings` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
 | EvtxECmd | `get-sybers/evtxecmd` | ✅ parse-verified (Maps/ baked in) |
 | iisGeolocate | `get-sybers/iisgeolocate` | ☑️ pure managed .NET — mount/refresh its GeoLite2 `.mmdb` databases if the release doesn't bundle current ones |
@@ -167,9 +167,37 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --read-only --tmpfs /work:rw,nosuid,nodev,uid=2000,gid=2000 \
   -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
   get-sybers/goamcache:latest -f /input/Amcache.hve --csv /output --csvf amcache.csv -i --work-dir /work
+### `get-sybers/goappcompat` — goappcompat (replaces AppCompatCacheParser)
+
+Like RBCmd/MFTECmd, AppCompatCacheParser parses on Linux under .NET; this
+substitute drops the .NET runtime with a static Go binary on Velociraptor's
+`regparser` (and its `appcompatcache` subpackage). It reads the AppCompatCache
+(ShimCache) value from a SYSTEM hive and emits one record per entry — ControlSet,
+CacheEntryPosition, Path, LastModifiedTimeUTC, SourceFile — as CSV or JSONL. The
+.NET tool's Executed/Duplicate columns are not emitted (regparser's shimcache
+parser does not expose that state — never faked). `-d` finds hives by their
+`regf` signature; the pipeline calls `-f /in/SYSTEM`. Parse-verified on a real
+SYSTEM hive (373 shimcache entries — real system32 executable paths + last-mod
+times).
+
+**Dirty-hive .LOG replay:** when `SYSTEM.LOG1/.LOG2` sit alongside the hive,
+goappcompat recovers a copy (applies the journalled dirty pages via
+`regparser.RecoverHive`) into `--work-dir` and parses that, matching the .NET
+tool's fidelity. The recovered copy needs a **writable** work dir — the rootfs is
+read-only, so mount a tmpfs and point `--work-dir` at it (`--tmpfs /tmp:...`; the
+zimmerman lane wires this, like wxtcmd). No logs / unwritable work dir / recovery
+error → it falls back to the committed hive with a one-line note (never
+hard-fails).
+
+```sh
+docker build -t get-sybers/goappcompat:latest -f goappcompat/Dockerfile goappcompat
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+  -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/goappcompat:latest -f /input/SYSTEM --csv /output --csvf appcompatcache.csv
 ```
 
-All five Go images are `FROM scratch`: one static binary, no shell, no python, no
+All six Go images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 

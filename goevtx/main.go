@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,14 +45,16 @@ import (
 // record is the EvtxECmd *.json per-event shape the pipeline consumes. Field
 // order follows EvtxECmd; byakugan reads by key so order is cosmetic.
 type record struct {
+	// Every key is always emitted (no omitempty) so the per-event JSON schema is
+	// stable across records — a consumer can rely on the field set.
 	EventId        int64       `json:"EventId"`
-	Level          int64       `json:"Level,omitempty"`
+	Level          int64       `json:"Level"`
 	Provider       string      `json:"Provider"`
 	Channel        string      `json:"Channel"`
 	Computer       string      `json:"Computer"`
 	EventRecordId  int64       `json:"EventRecordId"`
 	TimeCreated    string      `json:"TimeCreated"`
-	UserId         string      `json:"UserId,omitempty"`
+	UserId         string      `json:"UserId"`
 	MapDescription interface{} `json:"MapDescription"` // always null — no Maps layer
 	SourceFile     string      `json:"SourceFile"`
 	Payload        string      `json:"Payload"` // JSON string, EventData/UserData
@@ -119,7 +122,16 @@ func systemTime(system *ordereddict.Dict) string {
 		return ""
 	}
 	sec := int64(secs)
-	nsec := int64((secs - float64(sec)) * 1e9)
+	// round the fractional part and carry, so float error can't yield a nsec
+	// outside [0,1e9) (which time.Unix would silently mis-normalise)
+	nsec := int64(math.Round((secs - float64(sec)) * 1e9))
+	if nsec >= 1_000_000_000 {
+		sec++
+		nsec -= 1_000_000_000
+	} else if nsec < 0 {
+		sec--
+		nsec += 1_000_000_000
+	}
 	return time.Unix(sec, nsec).UTC().Format(time.RFC3339Nano)
 }
 
@@ -171,49 +183,55 @@ func toRecord(event *ordereddict.Dict, sourceFile string) (*record, error) {
 }
 
 // parseFile streams every event in `path` (a .evtx) to `emitJSON` (and `emitXML`
-// when non-nil), returning the number of events emitted.
-func parseFile(path string, emitJSON func(*record) error, emitXML func(*record) error) (int, error) {
+// when non-nil). Returns (emitted, skipped, err): `skipped` counts torn chunks
+// and unrenderable records that were dropped, so a lossy parse is reported
+// rather than passing silently as a clean run.
+func parseFile(path string, emitJSON func(*record) error, emitXML func(*record) error) (int, int, error) {
 	fd, err := os.Open(path)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer fd.Close()
 	chunks, err := evtx.GetChunks(fd)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	src := filepath.Base(path)
-	n := 0
+	n, skipped := 0, 0
 	for _, chunk := range chunks {
 		records, err := chunk.Parse(0)
 		if err != nil {
-			continue // a torn chunk is skipped; the rest of the log still parses
+			skipped++ // a torn chunk is skipped; the rest of the log still parses
+			continue
 		}
 		for _, r := range records {
 			em, ok := r.Event.(*ordereddict.Dict)
 			if !ok {
+				skipped++
 				continue
 			}
 			event, ok := ordereddict.GetMap(em, "Event")
 			if !ok || event == nil {
+				skipped++
 				continue
 			}
 			rec, err := toRecord(event, src)
 			if err != nil {
+				skipped++
 				continue
 			}
 			if err := emitJSON(rec); err != nil {
-				return n, err
+				return n, skipped, err
 			}
 			if emitXML != nil {
 				if err := emitXML(rec); err != nil {
-					return n, err
+					return n, skipped, err
 				}
 			}
 			n++
 		}
 	}
-	return n, nil
+	return n, skipped, nil
 }
 
 const evtxMagic = "ElfFile\x00"
@@ -279,7 +297,7 @@ func main() {
 		file    = flag.String("f", "", "single .evtx file to parse")
 		dir     = flag.String("d", "", "directory to scan recursively for .evtx")
 		jsonDir = flag.String("json", "", "directory to write JSONL output to (default: stdout)")
-		jsonF   = flag.String("jsonf", "", "JSONL file name (default: EvtxECmd_Output.jsonl)")
+		jsonF   = flag.String("jsonf", "", "JSONL file name (default: EvtxECmd_Output.json)")
 		xmlDir  = flag.String("xml", "", "directory to write the best-effort XML sidecar to")
 		xmlF    = flag.String("xmlf", "", "XML sidecar file name")
 		quiet   = flag.Bool("q", false, "suppress per-file progress on stderr")
@@ -302,7 +320,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	jw, err := openOut(*jsonDir, *jsonF, "EvtxECmd_Output.jsonl")
+	jw, err := openOut(*jsonDir, *jsonF, "EvtxECmd_Output.json")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "goevtx: %v\n", err)
 		os.Exit(1)
@@ -346,9 +364,9 @@ func main() {
 		}
 	}
 
-	failed, parsed, events := 0, 0, 0
+	failed, parsed, events, skippedTotal := 0, 0, 0, 0
 	for _, p := range inputs {
-		n, err := parseFile(p, emitJSON, emitXML)
+		n, skipped, err := parseFile(p, emitJSON, emitXML)
 		if err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "goevtx: FAILED %s: %v\n", p, err)
@@ -356,12 +374,21 @@ func main() {
 		}
 		parsed++
 		events += n
+		skippedTotal += skipped
 		if !*quiet {
-			fmt.Fprintf(os.Stderr, "goevtx: parsed %s (%d events)\n", p, n)
+			note := ""
+			if skipped > 0 {
+				note = fmt.Sprintf(", %d dropped (torn chunk/unrenderable)", skipped)
+			}
+			fmt.Fprintf(os.Stderr, "goevtx: parsed %s (%d events%s)\n", p, n, note)
 		}
 	}
 	if !*quiet {
-		fmt.Fprintf(os.Stderr, "goevtx: %d events across %d log(s)\n", events, parsed)
+		fmt.Fprintf(os.Stderr, "goevtx: %d events across %d log(s)", events, parsed)
+		if skippedTotal > 0 {
+			fmt.Fprintf(os.Stderr, "; %d record(s) dropped", skippedTotal)
+		}
+		fmt.Fprintln(os.Stderr)
 	}
 	if failed > 0 {
 		fmt.Fprintf(os.Stderr, "goevtx: %d of %d files failed\n", failed, len(inputs))

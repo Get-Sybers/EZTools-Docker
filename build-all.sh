@@ -13,8 +13,9 @@
 # README): goprefetch and goese are their Go substitutes. gorb replaces RBCmd
 # (Linux-viable under .NET) with a static Go binary to drop the .NET runtime.
 # As each remaining .NET tool is ported to Go it gets a go-name too (RECmd ->
-# gore, ...) — DX_DFIR #188 initiative 2. MFTECmd/EvtxECmd are ported
-# (gomft, on go-ntfs).
+# gore, ...) — DX_DFIR #188 initiative 2. Ported so far: MFTECmd -> gomft
+# (go-ntfs), EvtxECmd -> goevtx (go-evtx), Amcache/AppCompatCache ->
+# goamcache/goappcompat (regparser), plus gorb/goprefetch/goese.
 set -Eeuo pipefail
 cd "$(dirname "$0")"
 

@@ -30,7 +30,7 @@ artefacts natively.
 | **SrumECmd** | **`get-sybers/goese` (Go substitute)** | ❌ SrumECmd cannot parse on Linux → `goese` parses SRUDB.dat natively with IdMap/SID enrichment |
 | **SumECmd** | **`get-sybers/goese` (Go substitute)** | ❌ SumECmd cannot parse on Linux → `goese` reads SUM `Current.mdb` (any ESE database) |
 | **VSCMount** | *(no container possible)* | ❌ manipulates the Windows VSS device namespace; on Linux use libvshadow (`vshadowinfo`/`vshadowmount`) on the host |
-| WxTCmd | `get-sybers/wxtcmd` / all-in-one launcher | ✅ parse-verified — needs a writable exec `/tmp` (see below) |
+| **WxTCmd** | **`get-sybers/gowxt` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (modernc sqlite) to drop the .NET runtime — parses Windows Timeline ActivitiesCache.db |
 
 ### Why three tools are substituted, not packaged
 
@@ -226,7 +226,31 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   --jsonf Security_EvtxECmd_Output.json --xml /output --xmlf Security_EvtxECmd_Output.xml
 ```
 
-All seven Go images are `FROM scratch`: one static binary, no shell, no python, no
+### `get-sybers/gowxt` — gowxt (replaces WxTCmd)
+
+Like RBCmd/MFTECmd, WxTCmd parses on Linux under .NET; this substitute drops the
+.NET runtime with a static Go binary on `modernc.org/sqlite` (pure Go, no cgo).
+It reads the Windows Timeline **ActivitiesCache.db** and emits WxTCmd's Activity
+columns — the executable (from the `AppId` JSON), DisplayText / ContentInfo (from
+the `Payload` JSON), the Start/End/LastModified/Expiration timestamps
+(ActivitiesCache stamps Unix seconds → RFC3339 UTC), Duration and ActivityType —
+as CSV or JSONL. It covers the `Activity` table (the timeline core); columns WxTCmd
+derives from other providers, or that a given Windows build's schema doesn't
+carry, are omitted, never faked.
+
+SQLite needs a writable working area, but the input is mounted read-only under a
+read-only rootfs, so gowxt copies the DB into `--work-dir` (a **tmpfs**), falling
+back to an immutable read-only open when that dir isn't writable.
+
+```sh
+docker build -t get-sybers/gowxt:latest -f gowxt/Dockerfile gowxt
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only --tmpfs /work:rw,nosuid,nodev,uid=2000,gid=2000 \
+  -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/gowxt:latest -f /input/ActivitiesCache.db --csv /output --work-dir /work
+```
+
+All eight Go images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 

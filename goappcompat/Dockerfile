@@ -12,12 +12,21 @@
 # and CLI as the other GoDFIR tools; the zimmerman lane calls
 # `-f /in/SYSTEM --csv /out --csvf appcompatcache.csv`.
 #
+# Dirty-hive .LOG replay: when SYSTEM.LOG1/.LOG2 sit alongside the hive, goappcompat
+# recovers a copy (applies the dirty pages) into --work-dir and parses that. The
+# recovered copy needs a WRITABLE work dir — the rootfs here is read-only, so mount
+# a tmpfs at the work dir (default /tmp) and point --work-dir at it, e.g.
+# `--tmpfs /tmp:rw,nosuid,nodev,size=256m` (the DX_DFIR zimmerman lane wires this,
+# like wxtcmd). WITHOUT a writable work dir replay gracefully falls back to the
+# committed hive (a one-line note) — the tool still runs read-only, just no replay.
+#
 # The final image is FROM scratch: one static binary, nothing else — no shell,
 # no python, no package manager, no setuid, no libc; runs as uid 2000.
 #
 #   docker build -t get-sybers/goappcompat:latest -f goappcompat/Dockerfile goappcompat
-#   docker run --rm --cap-drop ALL --security-opt no-new-privileges \
-#     --network none --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+#   docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+#     --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m \
+#     -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
 #     get-sybers/goappcompat:latest -f /input/SYSTEM --csv /output --csvf appcompatcache.csv
 
 ARG GO_VERSION=1.24

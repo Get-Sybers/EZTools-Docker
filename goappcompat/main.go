@@ -13,8 +13,16 @@
 // LastModifiedTimeUTC, SourceFile. The .NET tool's Executed/Duplicate columns
 // are NOT emitted — regparser's shimcache parser does not expose the
 // insertion-flag/dedup state, and a guessed value would be worse than an
-// omitted one (never faked). LastModifiedTimeUTC is RFC3339 UTC, empty when the
-// entry carries no timestamp.
+// omitted one (never faked). LastModifiedTimeUTC is always present (RFC3339 UTC,
+// or "" when the entry carries no timestamp) so the JSONL schema is stable
+// across records.
+//
+// Dirty-hive .LOG replay: registry writes are journalled to SYSTEM.LOG1/.LOG2
+// and may not yet be committed to the hive. When those sibling logs are present,
+// the hive is recovered (regparser.RecoverHive applies the dirty pages) into a
+// writable --work-dir and the RECOVERED copy is parsed; when they are absent, or
+// replay cannot run (no logs, unwritable work dir, recovery error), the
+// committed hive is parsed with a one-line note — replay never hard-fails.
 //
 // The regparser appcompatcache parser targets the Win8.1/Win10+ shimcache
 // layout (the format on any modern image); a pre-Win8.1 hive whose cache uses
@@ -27,6 +35,7 @@ package main
 import (
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,7 +54,7 @@ type record struct {
 	ControlSet          int    `json:"ControlSet"`
 	CacheEntryPosition  int    `json:"CacheEntryPosition"`
 	Path                string `json:"Path"`
-	LastModifiedTimeUTC string `json:"LastModifiedTimeUTC,omitempty"`
+	LastModifiedTimeUTC string `json:"LastModifiedTimeUTC"`
 	SourceFile          string `json:"SourceFile"`
 }
 
@@ -64,6 +73,11 @@ func ts(t time.Time) string {
 	}
 	return t.UTC().Format(time.RFC3339Nano)
 }
+
+// errNoAppCompatCache marks a valid registry hive that simply carries no
+// AppCompatCache value (SOFTWARE, NTUSER, ... rather than SYSTEM). Under -d such
+// a hive is skipped silently; a genuine parse error (a corrupt regf) is not.
+var errNoAppCompatCache = errors.New("no AppCompatCache value (not a SYSTEM hive)")
 
 const regfMagic = "regf"
 
@@ -116,21 +130,18 @@ func appCompatCacheData(reg *regparser.Registry, cs int) []byte {
 	return nil
 }
 
-// parseHive reads a SYSTEM hive and returns its shimcache entries as records.
-func parseHive(path string) ([]*record, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	reg, err := regparser.NewRegistry(f)
+// parseReader reads the shimcache from an open registry hive; sourcePath is the
+// ORIGINAL committed-hive path recorded in the SourceFile column (even when the
+// recovered copy is what was parsed).
+func parseReader(reader io.ReaderAt, sourcePath string) ([]*record, error) {
+	reg, err := regparser.NewRegistry(reader)
 	if err != nil {
 		return nil, err
 	}
 	cs := currentControlSet(reg)
 	data := appCompatCacheData(reg, cs)
 	if data == nil {
-		return nil, fmt.Errorf("no ControlSet%03d\\...\\AppCompatCache value (not a SYSTEM hive?)", cs)
+		return nil, errNoAppCompatCache
 	}
 	entries := appcompatcache.ParseValueData(data)
 	out := make([]*record, 0, len(entries))
@@ -140,10 +151,77 @@ func parseHive(path string) ([]*record, error) {
 			CacheEntryPosition:  i,
 			Path:                e.Name,
 			LastModifiedTimeUTC: ts(e.Time),
-			SourceFile:          path,
+			SourceFile:          sourcePath,
 		})
 	}
 	return out, nil
+}
+
+// recoverHive runs regparser.RecoverHive with its temp output steered into
+// workDir (via TMPDIR) and stdout muted (RecoverHive prints [info] lines to
+// stdout, which would corrupt JSONL-on-stdout). Returns the recovered *os.File.
+func recoverHive(hive *os.File, workDir string, logs []*os.File) (*os.File, error) {
+	oldTmp, had := os.LookupEnv("TMPDIR")
+	os.Setenv("TMPDIR", workDir)
+	defer func() {
+		if had {
+			os.Setenv("TMPDIR", oldTmp)
+		} else {
+			os.Unsetenv("TMPDIR")
+		}
+	}()
+	old := os.Stdout
+	if dn, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0); err == nil {
+		os.Stdout = dn
+		defer func() { os.Stdout = old; dn.Close() }()
+	}
+	return regparser.RecoverHive(hive, logs...)
+}
+
+// openHiveReader returns a reader for the hive to parse plus a cleanup func. If
+// SYSTEM.LOG1/.LOG2 sit alongside `path`, the dirty pages are replayed and the
+// RECOVERED copy is returned; otherwise (or on any replay problem) the committed
+// hive is returned with a one-line note. Never hard-fails on replay.
+func openHiveReader(path, workDir string, quiet bool) (io.ReaderAt, func(), error) {
+	committed, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	var logs []*os.File
+	for _, ext := range []string{".LOG1", ".LOG2"} {
+		if lf, e := os.Open(path + ext); e == nil {
+			logs = append(logs, lf)
+		}
+	}
+	if len(logs) == 0 {
+		return committed, func() { committed.Close() }, nil
+	}
+	recovered, rerr := recoverHive(committed, workDir, logs)
+	for _, lf := range logs {
+		lf.Close()
+	}
+	if rerr != nil {
+		// committed is read via ReadAt (offset-based), so RecoverHive's io.Copy
+		// advancing its cursor does not affect reuse here.
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "goappcompat: log replay failed for %s (%v); using committed hive\n", path, rerr)
+		}
+		return committed, func() { committed.Close() }, nil
+	}
+	committed.Close()
+	if !quiet {
+		fmt.Fprintf(os.Stderr, "goappcompat: replayed transaction logs for %s\n", path)
+	}
+	return recovered, func() { name := recovered.Name(); recovered.Close(); os.Remove(name) }, nil
+}
+
+func parseHive(path, workDir string, quiet bool) ([]*record, error) {
+	reader, cleanup, err := openHiveReader(path, workDir, quiet)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return parseReader(reader, path)
 }
 
 type emitter struct {
@@ -204,6 +282,7 @@ func main() {
 		jsonF   = flag.String("jsonf", "", "JSONL file name (default: AppCompatCacheParser_Output.jsonl)")
 		csvDir  = flag.String("csv", "", "directory to write CSV output to instead of JSONL")
 		csvF    = flag.String("csvf", "", "CSV file name (default: AppCompatCacheParser_Output.csv)")
+		workDir = flag.String("work-dir", os.TempDir(), "writable dir for dirty-hive .LOG replay (the recovered copy is written here and deleted after)")
 		quiet   = flag.Bool("q", false, "suppress per-file progress on stderr")
 	)
 	flag.Parse()
@@ -256,12 +335,12 @@ func main() {
 		if dirMode && !looksLikeHive(p) {
 			continue // -d: pick registry hives out of the tree by their regf signature
 		}
-		recs, err := parseHive(p)
+		recs, err := parseHive(p, *workDir, *quiet)
 		if err != nil {
-			// under -d a regf file that is not a SYSTEM hive (SOFTWARE, NTUSER,
-			// ...) simply has no AppCompatCache — skip it silently; only -f (an
-			// explicitly named hive) reports the failure.
-			if dirMode {
+			// under -d, a regf hive that simply is not SYSTEM (SOFTWARE, NTUSER,
+			// ...) has no AppCompatCache — skip it silently; a genuine parse
+			// error on a hive (a corrupt regf) is still counted and reported.
+			if dirMode && errors.Is(err, errNoAppCompatCache) {
 				continue
 			}
 			failed++

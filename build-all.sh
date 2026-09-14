@@ -23,7 +23,7 @@ cd "$(dirname "$0")"
 # the download URL, so keep these exactly as published.
 LINUX_TOOLS=(
   bstrings iisGeolocate JLECmd
-  LECmd RecentFileCacheParser RECmd rla SBECmd SQLECmd WxTCmd
+  LECmd RecentFileCacheParser RECmd rla SBECmd SQLECmd
 )
 
 lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -70,6 +70,11 @@ build_goevtx() {
   docker build -t get-sybers/goevtx:latest -f goevtx/Dockerfile goevtx
 }
 
+build_gowxt() {
+  echo "==> get-sybers/gowxt (Go, WxTCmd substitute)"
+  docker build -t get-sybers/gowxt:latest -f gowxt/Dockerfile gowxt
+}
+
 build_all_in_one() {
   echo "==> get-sybers/eztools (all-in-one, eztools-all/Dockerfile)"
   docker build -t get-sybers/eztools:latest -f eztools-all/Dockerfile .
@@ -86,6 +91,7 @@ resolve() {
     goamcache|amcacheparser) build_goamcache; return ;;
     goappcompat|appcompatcacheparser) build_goappcompat; return ;;
     goevtx|evtxecmd) build_goevtx; return ;;
+    gowxt|wxtcmd) build_gowxt; return ;;
     all-in-one|eztools|all) build_all_in_one; return ;;
     vscmount)
       echo "VSCMount manipulates the Windows VSS device namespace and has no" >&2
@@ -99,8 +105,8 @@ resolve() {
       return
     fi
   done
-  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goamcache goappcompat goevtx all-in-one" >&2
-  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, amcacheparser, appcompatcacheparser, evtxecmd)" >&2
+  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goamcache goappcompat goevtx gowxt all-in-one" >&2
+  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, amcacheparser, appcompatcacheparser, evtxecmd, wxtcmd)" >&2
   exit 1
 }
 
@@ -115,5 +121,6 @@ else
   build_goamcache
   build_goappcompat
   build_goevtx
+  build_gowxt
 fi
 echo "done."

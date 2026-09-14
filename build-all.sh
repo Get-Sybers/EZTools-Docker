@@ -21,7 +21,7 @@ cd "$(dirname "$0")"
 # Zip basenames on download.ericzimmermanstools.com/net9/ — casing matters for
 # the download URL, so keep these exactly as published.
 LINUX_TOOLS=(
-  AmcacheParser AppCompatCacheParser bstrings EvtxECmd iisGeolocate JLECmd
+  AmcacheParser bstrings EvtxECmd iisGeolocate JLECmd
   LECmd RecentFileCacheParser RECmd rla SBECmd SQLECmd WxTCmd
 )
 
@@ -54,6 +54,11 @@ build_gomft() {
   docker build -t get-sybers/gomft:latest -f gomft/Dockerfile gomft
 }
 
+build_goappcompat() {
+  echo "==> get-sybers/goappcompat (Go, AppCompatCacheParser substitute)"
+  docker build -t get-sybers/goappcompat:latest -f goappcompat/Dockerfile goappcompat
+}
+
 build_all_in_one() {
   echo "==> get-sybers/eztools (all-in-one, eztools-all/Dockerfile)"
   docker build -t get-sybers/eztools:latest -f eztools-all/Dockerfile .
@@ -67,6 +72,7 @@ resolve() {
     goese|esedump|srum|srumecmd|sumecmd) build_goese; return ;;
     gorb|rbcmd) build_gorb; return ;;
     gomft|mftecmd) build_gomft; return ;;
+    goappcompat|appcompatcacheparser) build_goappcompat; return ;;
     all-in-one|eztools|all) build_all_in_one; return ;;
     vscmount)
       echo "VSCMount manipulates the Windows VSS device namespace and has no" >&2
@@ -80,8 +86,8 @@ resolve() {
       return
     fi
   done
-  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft all-in-one" >&2
-  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd)" >&2
+  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goappcompat all-in-one" >&2
+  echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, appcompatcacheparser)" >&2
   exit 1
 }
 
@@ -93,5 +99,6 @@ else
   build_goese
   build_gorb
   build_gomft
+  build_goappcompat
 fi
 echo "done."

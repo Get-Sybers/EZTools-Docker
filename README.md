@@ -13,7 +13,7 @@ artefacts natively.
 | Requested tool | Image | Linux status |
 | --- | --- | --- |
 | AmcacheParser | `get-sybers/amcacheparser` (or all-in-one) | ✅ parse-verified on real evidence |
-| AppCompatCacheParser | `get-sybers/appcompatcacheparser` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
+| **AppCompatCacheParser** | **`get-sybers/goappcompat` (Go substitute)** | ✅ Linux-viable under .NET, ported to a static Go binary (regparser) to drop .NET — real-SYSTEM-hive verified |
 | bstrings | `get-sybers/bstrings` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
 | EvtxECmd | `get-sybers/evtxecmd` | ✅ parse-verified (Maps/ baked in) |
 | iisGeolocate | `get-sybers/iisgeolocate` | ☑️ pure managed .NET — mount/refresh its GeoLite2 `.mmdb` databases if the release doesn't bundle current ones |
@@ -144,7 +144,27 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   get-sybers/gomft:latest -d /input --json /output --jsonf mftecmd.json
 ```
 
-All four Go images are `FROM scratch`: one static binary, no shell, no python, no
+### `get-sybers/goappcompat` — goappcompat (replaces AppCompatCacheParser)
+
+Like RBCmd/MFTECmd, AppCompatCacheParser parses on Linux under .NET; this
+substitute drops the .NET runtime with a static Go binary on Velociraptor's
+`regparser` (and its `appcompatcache` subpackage). It reads the AppCompatCache
+(ShimCache) value from a SYSTEM hive and emits one record per entry — ControlSet,
+CacheEntryPosition, Path, LastModifiedTimeUTC, SourceFile — as CSV or JSONL. The
+.NET tool's Executed/Duplicate columns are not emitted (regparser's shimcache
+parser does not expose that state — never faked). `-d` finds hives by their
+`regf` signature; the pipeline calls `-f /in/SYSTEM`. Parse-verified on a real
+SYSTEM hive (373 shimcache entries — real system32 executable paths + last-mod
+times).
+
+```sh
+docker build -t get-sybers/goappcompat:latest -f goappcompat/Dockerfile goappcompat
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/goappcompat:latest -f /input/SYSTEM --csv /output --csvf appcompatcache.csv
+```
+
+All five Go images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 

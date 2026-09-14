@@ -12,7 +12,7 @@ artefacts natively.
 
 | Requested tool | Image | Linux status |
 | --- | --- | --- |
-| AmcacheParser | `get-sybers/amcacheparser` (or all-in-one) | ✅ parse-verified on real evidence |
+| **AmcacheParser** | **`get-sybers/goamcache` (Go substitute)** | ✅ Linux-viable under .NET, but ported to a static Go binary (regparser) to drop the .NET runtime — real-hive verified |
 | AppCompatCacheParser | `get-sybers/appcompatcacheparser` | ✅ parse-verified (dirty hives need `.LOG1/.LOG2` alongside) |
 | bstrings | `get-sybers/bstrings` | ☑️ pure managed .NET — build-verified; parse-verify on first use |
 | EvtxECmd | `get-sybers/evtxecmd` | ✅ parse-verified (Maps/ baked in) |
@@ -144,7 +144,27 @@ docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
   get-sybers/gomft:latest -d /input --json /output --jsonf mftecmd.json
 ```
 
-All four Go images are `FROM scratch`: one static binary, no shell, no python, no
+### `get-sybers/goamcache` — goamcache (replaces AmcacheParser)
+
+Like RBCmd/MFTECmd, AmcacheParser parses on Linux under .NET; this substitute
+drops the .NET runtime with a static Go binary on Velociraptor's `regparser`. It
+parses an `Amcache.hve` and emits one record per program-execution file entry
+(`Root\InventoryApplicationFile`) — the key's last-write time, ProgramId, the
+SHA-1 (the `0000`-prefixed `FileId` stripped to the bare 40-hex hash), full path,
+name, publisher/product/version and size — as CSV or JSONL, mirroring
+AmcacheParser's `-i` columns. **Limitation:** regparser reads the committed hive
+only — it does not replay the `.LOG1/.LOG2` dirty-hive transaction logs (stated,
+not faked). Parse-verified on a real Amcache.hve (237 entries — real program
+names, 40-hex SHA-1s, full paths and key times).
+
+```sh
+docker build -t get-sybers/goamcache:latest -f goamcache/Dockerfile goamcache
+docker run --rm --cap-drop ALL --security-opt no-new-privileges --network none \
+  --read-only -v "$PWD/in:/input:ro" -v "$PWD/out:/output" \
+  get-sybers/goamcache:latest -f /input/Amcache.hve --csv /output --csvf amcache.csv -i
+```
+
+All five Go images are `FROM scratch`: one static binary, no shell, no python, no
 libc, `USER 2000:2000` — the hardening contract holds by construction, and the
 `docker export` scan verifies it the same way as for the .NET images.
 

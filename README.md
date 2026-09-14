@@ -252,9 +252,6 @@ docker build -t get-sybers/sqlecmd:latest  --build-arg EZTOOL=SQLECmd \
 ./build-all.sh
 ```
 
-`evtxecmd/Dockerfile` is the original, EvtxECmd-specific build (bakes `Maps/`;
-same posture) that the parameterized recipe generalises.
-
 ## The all-in-one image (`eztools-all/`)
 
 One image, every Linux-viable EZ tool, selected at **run** time — the

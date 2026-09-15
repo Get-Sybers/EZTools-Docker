@@ -56,8 +56,9 @@ SUMMARY (stdout, one JSON object)
 EXIT CODE
   0  normal (including a fully idempotent re-run: everything skipped)
   1  the run produced nothing, nothing was already done, and something failed
-     (the retryable Windows-without-symbols case), or a summary-level error
-  2  configuration error (memory dir missing / output dir unwritable)
+     (the retryable Windows-without-symbols case)
+  2  a configuration or summary-level error (memory dir missing / output dir
+     unwritable / any summary "error")
 
 Idempotency: a plugin whose ``<dest>/plugins/<plugin>.jsonl`` exists and whose
 first line parses as JSON is done (also honoured: the legacy flat
@@ -69,11 +70,19 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+from collections import deque
 
 TOOL = "piiat-mem"
+
+# A Volatility plugin name is a dotted identifier (e.g. windows.pslist,
+# banners.Banners) — never a path. This anchors what may be interpolated into an
+# output path, so a caller can't smuggle path separators / traversal (../) into
+# PIIAT_PLUGINS and steer the per-plugin write/cleanup off <dest>/plugins.
+_PLUGIN_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.]*\Z")
 
 # The CAR plugin set, by PIIAT-Mem's PUBLIC plugin names (its CLI interface).
 # banners.Banners runs first — format-agnostic, it sanity-checks the image
@@ -120,8 +129,14 @@ def env_bool(name: str) -> bool:
 
 def env_plugins() -> list[str]:
     raw = os.environ.get("PIIAT_PLUGINS", "")
-    names = [p.strip() for p in raw.split(",") if p.strip()]
-    return names or list(DEFAULT_PLUGINS)
+    safe = []
+    for p in (p.strip() for p in raw.split(",") if p.strip()):
+        if _PLUGIN_RE.match(p):
+            safe.append(p)
+        else:
+            sys.stderr.write(f"[{TOOL}] ignoring invalid plugin name {p!r} — a "
+                             "Volatility plugin id is dotted letters/digits/._, not a path\n")
+    return safe or list(DEFAULT_PLUGINS)
 
 
 # --- discovery ---------------------------------------------------------------
@@ -184,13 +199,15 @@ def _plugin_done(dest: str, plugin: str) -> bool:
 
 
 def _tail(path: str, n: int) -> str:
-    """Last ``n`` lines of a text file, or "" if unreadable — for diagnostics."""
+    """Last ``n`` lines of a text file, or "" if unreadable — for diagnostics.
+    A deque(maxlen=n) keeps only the last n lines in memory, so a multi-GB
+    piiat_mem.log doesn't spike memory when diagnostics are emitted."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
+            lines = deque(fh, maxlen=n)
     except OSError:
         return ""
-    return "".join(lines[-n:]).rstrip()
+    return "".join(lines).rstrip()
 
 
 # --- one PIIAT-Mem run -------------------------------------------------------
@@ -252,11 +269,14 @@ def process(memory_dir: str, out_dir: str, symbols_dir: str, plugins: list[str],
     except OSError as exc:
         summary["error"] = f"output dir not writable by uid {os.getuid()}: {out_dir} ({exc})"
         return summary
+    # /symbols is a caller-provided bind mount where Volatility caches fetched ISF
+    # symbols; the caller must mount it writable by this image's uid. We do NOT
+    # chmod it — that would mutate the permissions of the host path behind the
+    # bind mount. A pre-seeded, read-only symbol tree is fine for offline runs.
     try:
         os.makedirs(symbols_dir, exist_ok=True)
-        os.chmod(symbols_dir, 0o777)  # Volatility caches fetched ISF here
     except OSError:
-        pass  # a pre-seeded, read-only symbol tree is fine for offline runs
+        pass
 
     images_found = discover(memory_dir)
     summary["images"] = len(images_found)

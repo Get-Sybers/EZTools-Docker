@@ -22,9 +22,14 @@
 # The caller supplies piiat_mem's flags (the image forces --native); e.g. the
 # DX_DFIR volatility lane mounts the image read-only, an output dir read-write
 # and an ISF symbol cache, then:
-#   docker run --rm --network none \
+#   docker run --rm --network none --read-only --tmpfs /tmp \
 #     -v "$mem_dir:/mem:ro" -v "$out:/out" -v "$symbols:/symbols" \
 #     get-sybers/piiat-mem:latest -f /mem/<image> -o /out --symbols /symbols
+# /out and /symbols must be writable by the runtime uid (2000); /tmp is HOME and
+# Volatility's cache, so a --read-only rootfs needs the tmpfs. Windows plugins
+# fetch ISF symbols on first use: under --native piiat_mem's --symbols-online is
+# a no-op (it only lifts ITS OWN container's isolation), so either pre-seed
+# /symbols or give THIS container network for that run.
 ARG BASE=python:3.12-slim
 ARG PIIAT_MEM_REPO=https://github.com/Get-Sybers/PIIAT-Mem
 ARG PIIAT_MEM_REF=main
@@ -52,7 +57,13 @@ RUN set -eux; \
 # --- stage 2: python runtime + Volatility + in-image hardening ---------------
 # Volatility IS python, so python is irreducible; pip/apt/ansible and every shell
 # are removed by the shared build-time hardener. yara-python backs the
-# windows.vadyarascan plugin.
+# windows.vadyarascan plugin. Volatility's only hard dependency is pefile.
+#
+# The build-time hardener (ansible-core) is installed into a THROWAWAY dir
+# (pip --target), not site-packages: removing that one dir afterwards drops
+# ansible AND its whole dependency closure (jinja2, cryptography, cffi, PyYAML,
+# resolvelib, …), so the runtime site-packages holds nothing but Volatility,
+# yara-python and pefile.
 FROM ${BASE} AS hardened
 ARG VOLATILITY_VERSION
 ARG YARA_PYTHON_VERSION
@@ -61,8 +72,8 @@ ARG DFIR_GID
 RUN set -eux; \
     pip install --no-cache-dir \
       "volatility3==${VOLATILITY_VERSION}" \
-      "yara-python==${YARA_PYTHON_VERSION}" \
-      ansible-core
+      "yara-python==${YARA_PYTHON_VERSION}"; \
+    pip install --no-cache-dir --target /tmp/ansible ansible-core
 # The PIIAT-Mem tree (piiat_mem package + jsonl_dfir_renderer.py + plugins/): run
 # from here via PYTHONPATH so runner.py resolves the renderer and plugins, which
 # live at the tree root (not inside the package).
@@ -71,12 +82,16 @@ COPY hardening/harden.yml /tmp/hardening/harden.yml
 RUN set -eux; \
     # world-readable so the non-root runtime uid can import the tree.
     chmod -R a+rX /opt/piiat-mem; \
-    ansible-playbook -c local -i localhost, /tmp/hardening/harden.yml \
+    PYTHONPATH=/tmp/ansible /tmp/ansible/bin/ansible-playbook -c local -i localhost, \
+      /tmp/hardening/harden.yml \
       -e harden_uid=${DFIR_UID} -e harden_gid=${DFIR_GID}; \
-    rm -rf /usr/local/bin/ansible* /usr/local/lib/python3*/site-packages/ansible* \
-           /etc/ansible /root/.ansible /tmp/hardening \
+    # remove the build-time hardener (+ its deps, one dir), every shell, and
+    # perl (the base ships it; nothing here needs a second interpreter). KEEP
+    # python3 + the baked tree (python is the tool, like plaso/byakugan).
+    rm -rf /tmp/ansible /etc/ansible /root/.ansible /tmp/hardening \
            /bin/sh /bin/dash /bin/bash /bin/rbash \
-           /usr/bin/sh /usr/bin/dash /usr/bin/bash /usr/bin/rbash
+           /usr/bin/sh /usr/bin/dash /usr/bin/bash /usr/bin/rbash \
+           /usr/bin/bashbug /usr/bin/perl*
 
 FROM scratch
 COPY --from=hardened / /

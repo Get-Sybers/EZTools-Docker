@@ -513,10 +513,18 @@ with no nested `docker run`. The PIIAT-Mem source is cloned at build time at
 forces `--native`:
 
 ```
-docker run --rm --network none \
+docker run --rm --network none --read-only --tmpfs /tmp \
   -v "$mem_dir:/mem:ro" -v "$out:/out" -v "$symbols:/symbols" \
   get-sybers/piiat-mem:latest -f /mem/<image> -o /out --symbols /symbols
 ```
+
+`/out` and `/symbols` must be writable by uid 2000; `/tmp` is `HOME` and
+Volatility's cache, so a read-only rootfs needs the tmpfs. Windows plugins fetch
+ISF symbols on first use — under `--native`, piiat_mem's `--symbols-online` only
+lifts *its own* container's isolation (a no-op here), so pre-seed `/symbols` or
+give this container network for that run. Runtime site-packages hold only
+`volatility3`, `yara-python` and `pefile`: the build-time hardener is installed
+into a throwaway dir and removed with its whole dependency closure.
 
 ## License
 

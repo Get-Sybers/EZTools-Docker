@@ -19,17 +19,45 @@
 #   docker build -t get-sybers/piiat-mem:latest \
 #     --build-arg PIIAT_MEM_REF=<40-hex sha> -f piiat-mem/Dockerfile .
 #
-# The caller supplies piiat_mem's flags (the image forces --native); e.g. the
-# DX_DFIR volatility lane mounts the image read-only, an output dir read-write
-# and an ISF symbol cache, then:
+# SELF-ORCHESTRATING, ENV-DRIVEN. The ENTRYPOINT is the baked batch orchestrator
+# (piiat_mem_batch.py): with NO arguments it discovers every memory image under
+# the mounted memory dir and runs the CAR plugin set over each one through
+# PIIAT-Mem's public CLI (`python3 -m piiat_mem --native ... --no-timeline`),
+# per-plugin idempotent, streaming each image's run to <out>/<image>/piiat_mem.log
+# and printing ONE JSON summary line on stdout for the caller to gate on. No
+# wrapper on the host: the DX_DFIR ansible lane just runs
+#
 #   docker run --rm --network none --read-only --tmpfs /tmp \
+#     -e PIIAT_PLUGINS= -e PIIAT_FORCE=0 -e PIIAT_SYMBOLS_ONLINE=0 \
 #     -v "$mem_dir:/mem:ro" -v "$out:/out" -v "$symbols:/symbols" \
-#     get-sybers/piiat-mem:latest -f /mem/<image> -o /out --symbols /symbols
+#     get-sybers/piiat-mem:latest
+#
+# Env-var contract (all optional; defaults match the mount points):
+#   PIIAT_MEMORY_DIR      memory image tree, recursed          default /mem
+#   PIIAT_OUT_DIR         output root, one folder per image    default /out
+#   PIIAT_SYMBOLS_DIR     ISF symbol cache (read-write)        default /symbols
+#   PIIAT_PLUGINS         comma-separated plugin names; empty = the default CAR set
+#   PIIAT_FORCE           1/true/yes/on = rerun plugins with valid output (default 0)
+#   PIIAT_SYMBOLS_ONLINE  1/true/yes/on = "this container has network for the ISF
+#                         fetch" — INFORMATIONAL (recorded in the summary); the
+#                         container's --network is what actually gates it (default 0)
+# Outputs: <out>/<clean image name>/plugins/<plugin>.jsonl, <out>/<clean image
+# name>/piiat_mem.log; stdout = one JSON summary line ({"tool":"piiat-mem",
+# images, plugins, processed, skipped, failed, results[, diagnostics][, error]});
+# stderr = progress + diagnostics. Exit 0 normal (incl. all-skipped re-runs),
+# 1 nothing produced/nothing done, 2 config error. Full contract: the docstring
+# in piiat_mem_batch.py and the README.
+#
+# Any CLI argument switches to pass-through: `... get-sybers/piiat-mem -f
+# /mem/<image> -o /out --symbols /symbols` runs PIIAT-Mem's own single-image CLI
+# (--native still forced) — the previous run shape, for manual use.
+#
 # /out and /symbols must be writable by the runtime uid (2000); /tmp is HOME and
 # Volatility's cache, so a --read-only rootfs needs the tmpfs. Windows plugins
 # fetch ISF symbols on first use: under --native piiat_mem's --symbols-online is
 # a no-op (it only lifts ITS OWN container's isolation), so either pre-seed
-# /symbols or give THIS container network for that run.
+# /symbols (offline, the default posture) or give THIS container network for
+# that run (`--network bridge` instead of `--network none`).
 ARG BASE=python:3.12-slim
 ARG PIIAT_MEM_REPO=https://github.com/Get-Sybers/PIIAT-Mem
 ARG PIIAT_MEM_REF=main
@@ -78,10 +106,14 @@ RUN set -eux; \
 # from here via PYTHONPATH so runner.py resolves the renderer and plugins, which
 # live at the tree root (not inside the package).
 COPY --from=src /src /opt/piiat-mem
+# The env-driven batch orchestrator (this image's ENTRYPOINT): discovers the
+# images, runs PIIAT-Mem's CLI per image, judges per-plugin output, emits the
+# summary. Belongs upstream as `piiat-mem --batch` eventually; baked here for now.
+COPY piiat-mem/piiat_mem_batch.py /opt/piiat-mem-batch/piiat_mem_batch.py
 COPY hardening/harden.yml /tmp/hardening/harden.yml
 RUN set -eux; \
     # world-readable so the non-root runtime uid can import the tree.
-    chmod -R a+rX /opt/piiat-mem; \
+    chmod -R a+rX /opt/piiat-mem /opt/piiat-mem-batch; \
     PYTHONPATH=/tmp/ansible /tmp/ansible/bin/ansible-playbook -c local -i localhost, \
       /tmp/hardening/harden.yml \
       -e harden_uid=${DFIR_UID} -e harden_gid=${DFIR_GID}; \
@@ -106,9 +138,11 @@ ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/opt/piiat-mem
 USER ${DFIR_UID}:${DFIR_GID}
-# --native: Volatility runs IN-PROCESS, confined by this image (no nested docker).
-ENTRYPOINT ["python3", "-m", "piiat_mem", "--native"]
+# The env-driven batch orchestrator. No args: batch mode over PIIAT_MEMORY_DIR
+# (runs `python3 -m piiat_mem --native` per image, in-process Volatility, no
+# nested docker). Any args: pass-through to that single-image CLI.
+ENTRYPOINT ["python3", "/opt/piiat-mem-batch/piiat_mem_batch.py"]
 LABEL org.opencontainers.image.title="get-sybers/piiat-mem" \
-      org.opencontainers.image.description="Minimal hardened PIIAT-Mem (Volatility 3 memory forensics) for the DX_DFIR volatility lane: source cloned + built in at the sources.yml pin, uid0 renamed+locked, no ansible/apt/pip/sudo/setuid/shell, runs as a fixed non-root uid (default 2000). python kept (Volatility is python); runs Volatility in-process via --native, no nested docker." \
+      org.opencontainers.image.description="Minimal hardened PIIAT-Mem (Volatility 3 memory forensics) for the DX_DFIR volatility lane: source cloned + built in at the sources.yml pin, uid0 renamed+locked, no ansible/apt/pip/sudo/setuid/shell, runs as a fixed non-root uid (default 2000). python kept (Volatility is python). Self-orchestrating: env-driven (PIIAT_MEMORY_DIR/PIIAT_OUT_DIR/PIIAT_SYMBOLS_DIR/PIIAT_PLUGINS/PIIAT_FORCE/PIIAT_SYMBOLS_ONLINE) batch over a mounted memory dir, Volatility in-process via --native, no nested docker." \
       com.get-sybers.hardened="true" \
       com.get-sybers.piiat-mem.ref="${PIIAT_MEM_REF}"

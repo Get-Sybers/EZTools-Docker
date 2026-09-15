@@ -99,9 +99,10 @@ build_gowxt() {
 
 build_piiat_mem() {
   # PIIAT-Mem (Volatility 3 memory forensics), python. Context is the repo root
-  # so hardening/harden.yml is in reach; the source is cloned at build time at
+  # so hardening/harden.yml and piiat-mem/piiat_mem_batch.py (the env-driven
+  # batch ENTRYPOINT) are in reach; the source is cloned at build time at
   # PIIAT_MEM_REF (default main here — DX_DFIR passes its sources.yml pin).
-  echo "==> get-sybers/piiat-mem (python, PIIAT-Mem / Volatility 3, --native)"
+  echo "==> get-sybers/piiat-mem (python, PIIAT-Mem / Volatility 3, env-driven batch, --native)"
   docker build -t get-sybers/piiat-mem:latest \
     ${PIIAT_MEM_REF:+--build-arg PIIAT_MEM_REF="${PIIAT_MEM_REF}"} \
     -f piiat-mem/Dockerfile .

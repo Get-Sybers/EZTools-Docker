@@ -501,6 +501,23 @@ what the DX_DFIR pipeline's image role does after every build.
   Windows*; `get-sybers/goprefetch` exists because Linux pipelines otherwise had to
   fall back to Plaso for `.pf`.
 
+## Memory forensics — `get-sybers/piiat-mem`
+
+Beyond the EZ CLI family, this repo also builds **`get-sybers/piiat-mem`**
+(`piiat-mem/Dockerfile`): [PIIAT-Mem](https://github.com/Get-Sybers/PIIAT-Mem)
+(Volatility 3 memory forensics) fused into one hardened python image. Volatility
+runs **in-process** via piiat_mem's `--native` backend — confined by the image,
+with no nested `docker run`. The PIIAT-Mem source is cloned at build time at
+`--build-arg PIIAT_MEM_REF` (DX_DFIR passes its `sources.yml` pin). Build it with
+`./build-all.sh piiat-mem`. The caller supplies piiat_mem's flags; the image
+forces `--native`:
+
+```
+docker run --rm --network none \
+  -v "$mem_dir:/mem:ro" -v "$out:/out" -v "$symbols:/symbols" \
+  get-sybers/piiat-mem:latest -f /mem/<image> -o /out --symbols /symbols
+```
+
 ## License
 
 MIT (this recipe and the Go tools). Eric Zimmerman's tools are themselves

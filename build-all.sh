@@ -97,6 +97,16 @@ build_gowxt() {
   docker build -t get-sybers/gowxt:latest -f gowxt/Dockerfile gowxt
 }
 
+build_piiat_mem() {
+  # PIIAT-Mem (Volatility 3 memory forensics), python. Context is the repo root
+  # so hardening/harden.yml is in reach; the source is cloned at build time at
+  # PIIAT_MEM_REF (default main here — DX_DFIR passes its sources.yml pin).
+  echo "==> get-sybers/piiat-mem (python, PIIAT-Mem / Volatility 3, --native)"
+  docker build -t get-sybers/piiat-mem:latest \
+    ${PIIAT_MEM_REF:+--build-arg PIIAT_MEM_REF="${PIIAT_MEM_REF}"} \
+    -f piiat-mem/Dockerfile .
+}
+
 build_all_in_one() {
   echo "==> get-sybers/eztools (all-in-one, eztools-all/Dockerfile)"
   docker build -t get-sybers/eztools:latest -f eztools-all/Dockerfile .
@@ -118,6 +128,7 @@ resolve() {
     gole|lecmd) build_gole; return ;;
     gojle|jlecmd) build_gojle; return ;;
     gowxt|wxtcmd) build_gowxt; return ;;
+    piiat-mem|piiatmem|volatility|memory) build_piiat_mem; return ;;
     all-in-one|eztools|all) build_all_in_one; return ;;
     vscmount)
       echo "VSCMount manipulates the Windows VSS device namespace and has no" >&2
@@ -131,7 +142,7 @@ resolve() {
       return
     fi
   done
-  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goamcache goappcompat goevtx gore gosbe gole gojle gowxt all-in-one" >&2
+  echo "unknown tool '$1' — valid: ${LINUX_TOOLS[*]} goprefetch goese gorb gomft goamcache goappcompat goevtx gore gosbe gole gojle gowxt piiat-mem all-in-one" >&2
   echo "  (the substituted EZ-tool names also work: pecmd, srumecmd/sumecmd, rbcmd, mftecmd, amcacheparser, appcompatcacheparser, evtxecmd, recmd, sbecmd, lecmd, jlecmd, wxtcmd)" >&2
   exit 1
 }
@@ -152,5 +163,6 @@ else
   build_gole
   build_gojle
   build_gowxt
+  build_piiat_mem
 fi
 echo "done."
